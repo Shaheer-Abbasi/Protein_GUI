@@ -1,13 +1,6 @@
-# Protein Sequence Analysis Tool
+# Sen Lab Protein Sequence Analysis Tool
 
 A simple GUI application built with PyQt5 for analyzing protein sequences.
-
-## Features
-
-- **User-friendly Interface**: Clean and intuitive GUI for entering protein sequences
-- **Sequence Input**: Text area for pasting amino acid sequences
-- **Basic Analysis**: Displays sequence length and other basic information
-- **Extensible Design**: Ready to be extended with BLASTP functionality
 
 ## Requirements
 
@@ -34,21 +27,8 @@ Run the application:
 python protein_gui.py
 ```
 
-1. Enter or paste a protein sequence in the input text area
-2. Click "Process Sequence" to analyze the sequence
-3. View the results in the output area
-
 ## Future Enhancements
 
 - Integration with BLASTP for sequence similarity searches
-- Additional sequence analysis features
-- Export functionality for results
-- Support for multiple sequence formats
-
-## Contributing
-
-Feel free to fork this project and submit pull requests for any improvements.
-
-## License
-
-This project is open source and available under the [MIT License](LICENSE).
+- Implement GPU/CUDA acceleration to BLASTP to improve run time
+- Improve UI design to support additional sequencing features
