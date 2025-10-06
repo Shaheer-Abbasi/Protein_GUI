@@ -52,3 +52,21 @@ Thumbs.db
 *.log
 *.tmp
 temp/
+
+# BLAST databases (large binary files)
+blast_databases/
+*.pdb
+*.phr
+*.pin
+*.pjs
+*.pog
+*.pos
+*.pot
+*.ppd
+*.ppi
+*.psq
+*.ptf
+*.pto
+*.btd
+*.bti
+*.sqlite3
