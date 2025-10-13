@@ -2,12 +2,157 @@ import sys
 import subprocess
 import tempfile
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTextEdit, QPushButton, QLabel, QComboBox, QHBoxLayout, QCheckBox, QLineEdit, QFileDialog, QGroupBox, QStackedWidget, QFrame, QGridLayout
-from PyQt5.QtCore import QThread, pyqtSignal, Qt
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTextEdit, QPushButton, QLabel, QComboBox, QHBoxLayout, QCheckBox, QLineEdit, QFileDialog, QGroupBox, QStackedWidget, QFrame, QGridLayout, QCompleter
+from PyQt5.QtCore import QThread, pyqtSignal, Qt, QStringListModel, QSortFilterProxyModel
 from PyQt5.QtGui import QFont, QPixmap
 from Bio.Blast import NCBIXML
 from Bio import SeqIO
 from io import StringIO
+
+# Comprehensive NCBI BLAST databases with descriptions
+NCBI_DATABASES = {
+    # Protein databases
+    'nr': 'Non-redundant protein sequences (all proteins)',
+    'refseq_protein': 'Reference proteins (RefSeq)',
+    'swissprot': 'UniProtKB/Swiss-Prot (curated protein sequences)',
+    'pdb': 'Protein Data Bank proteins',
+    'env_nr': 'Non-redundant protein sequences from environmental samples',
+    'tsa_nr': 'Non-redundant protein sequences from transcriptome shotgun assembly',
+    'pataa': 'Patent protein sequences',
+    'pdbaa': 'PDB protein sequences (deprecated, use pdb)',
+    
+    # Nucleotide databases  
+    'nt': 'Nucleotide collection (nt)',
+    'refseq_rna': 'Reference RNA sequences',
+    'refseq_genomic': 'Reference genomic sequences',
+    'chromosome': 'RefSeq chromosome sequences',
+    'tsa_nt': 'Transcriptome Shotgun Assembly nucleotides',
+    'env_nt': 'Environmental nucleotide sequences',
+    'wgs': 'Whole-genome shotgun sequences',
+    'gss': 'Genome survey sequences',
+    'est': 'Expressed sequence tags',
+    'est_human': 'Human ESTs',
+    'est_mouse': 'Mouse ESTs',
+    'est_others': 'ESTs from organisms other than human and mouse',
+    'htgs': 'High throughput genomic sequences',
+    'patnt': 'Patent nucleotide sequences',
+    'pdbnt': 'PDB nucleotide sequences',
+    'dbsts': 'Database of sequence tagged sites',
+    'landmark': 'Landmark database for BLAST',
+    '16S_ribosomal_RNA': '16S ribosomal RNA sequences',
+    'ITS_RefSeq_Fungi': 'Internal transcribed spacer region, fungi',
+    '18S_fungal_sequences': '18S ribosomal RNA sequences, fungi',
+    '28S_fungal_sequences': '28S ribosomal RNA sequences, fungi',
+    'Betacoronavirus': 'Betacoronavirus sequences',
+    
+    # Organism-specific databases
+    'ref_euk_rep_genomes': 'Representative eukaryotic genomes',
+    'ref_prok_rep_genomes': 'Representative prokaryotic genomes',
+    'ref_viroids_rep_genomes': 'Representative viroid genomes',
+    'ref_viruses_rep_genomes': 'Representative viral genomes',
+    
+    # Specialized databases
+    'cdd': 'Conserved Domain Database',
+    'smart': 'Simple Modular Architecture Research Tool',
+    'pfam': 'Protein families database',
+    'kog': 'EuKaryotic Orthologous Groups',
+    'cog': 'Clusters of Orthologous Groups',
+    'prk': 'Protein clusters',
+    'tigr': 'TIGRFAMs database',
+    
+    # Human genome databases
+    'human_genomic': 'Human genomic sequences',
+    'human_genome': 'Human genome',
+    'mouse_genomic': 'Mouse genomic sequences',
+    'mouse_genome': 'Mouse genome'
+}
+
+# Categories for better organization
+DATABASE_CATEGORIES = {
+    'Protein Databases': [
+        'nr', 'refseq_protein', 'swissprot', 'pdb', 'env_nr', 'tsa_nr', 'pataa'
+    ],
+    'Nucleotide Databases': [
+        'nt', 'refseq_rna', 'refseq_genomic', 'chromosome', 'tsa_nt', 'env_nt', 'wgs'
+    ],
+    'Specialized Sequences': [
+        '16S_ribosomal_RNA', 'ITS_RefSeq_Fungi', '18S_fungal_sequences', 
+        '28S_fungal_sequences', 'Betacoronavirus'
+    ],
+    'Genome Collections': [
+        'ref_euk_rep_genomes', 'ref_prok_rep_genomes', 'ref_viroids_rep_genomes', 
+        'ref_viruses_rep_genomes', 'human_genomic', 'mouse_genomic'
+    ],
+    'Domain/Family Databases': [
+        'cdd', 'smart', 'pfam', 'kog', 'cog', 'prk', 'tigr'
+    ],
+    'Legacy/Other': [
+        'est', 'est_human', 'est_mouse', 'est_others', 'htgs', 'patnt', 
+        'pdbnt', 'dbsts', 'landmark', 'gss', 'pdbaa'
+    ]
+}
+
+
+class SearchableComboBox(QComboBox):
+    """A combobox with search/filter functionality"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.NoInsert)
+        
+        # Create completer for auto-completion
+        self.completer = QCompleter(self)
+        self.completer.setCompletionMode(QCompleter.PopupCompletion)
+        self.completer.setCaseSensitivity(Qt.CaseInsensitive)
+        self.setCompleter(self.completer)
+        
+        # Connect signals for filtering
+        self.lineEdit().textChanged.connect(self.filter_items)
+        
+        # Store all items for filtering
+        self.all_items = []
+        self.all_data = {}
+    
+    def addItemWithData(self, text, data=None):
+        """Add item with optional data"""
+        self.all_items.append(text)
+        if data:
+            self.all_data[text] = data
+        super().addItem(text)
+    
+    def setItems(self, items_dict):
+        """Set items from dictionary {text: data}"""
+        self.clear()
+        self.all_items.clear()
+        self.all_data.clear()
+        
+        for text, data in items_dict.items():
+            self.addItemWithData(text, data)
+        
+        # Update completer
+        self.completer.setModel(QStringListModel(self.all_items))
+    
+    def filter_items(self, text):
+        """Filter items based on text input"""
+        if not text:
+            # Show all items if no filter text
+            self.clear()
+            for item in self.all_items:
+                super().addItem(item)
+        else:
+            # Filter items that contain the text (case-insensitive)
+            self.clear()
+            filtered_items = [item for item in self.all_items 
+                            if text.lower() in item.lower() or 
+                               text.lower() in self.all_data.get(item, '').lower()]
+            for item in filtered_items:
+                super().addItem(item)
+    
+    def getCurrentData(self):
+        """Get data for currently selected item"""
+        current_text = self.currentText()
+        return self.all_data.get(current_text, current_text)
 
 class BLASTWorker(QThread):
     """Worker thread to run BLAST without freezing the GUI"""
@@ -328,13 +473,65 @@ class BLASTPage(QWidget):
         source_layout.addWidget(self.remote_radio)
         
         # Database selection
-        db_layout = QHBoxLayout()
+        db_layout = QVBoxLayout()
+        db_header_layout = QHBoxLayout()
         db_label = QLabel("Database:")
-        self.db_combo = QComboBox()
-        self.db_combo.addItems(['swissprot', 'nr', 'pdb'])
-        db_layout.addWidget(db_label)
+        db_info_label = QLabel("Search or select from 40+ available databases")
+        db_info_label.setStyleSheet("color: #7f8c8d; font-size: 10px;")
+        
+        db_header_layout.addWidget(db_label)
+        db_header_layout.addStretch()
+        db_header_layout.addWidget(db_info_label)
+        
+        # Create searchable combobox
+        self.db_combo = SearchableComboBox()
+        self.db_combo.setItems(NCBI_DATABASES)
+        self.db_combo.setCurrentText('swissprot')  # Default selection
+        self.db_combo.setMinimumHeight(30)
+        self.db_combo.setToolTip("Type to search databases by name or description")
+        self.db_combo.currentTextChanged.connect(self.on_database_changed)
+        
+        # Database description label
+        self.db_description = QLabel()
+        self.db_description.setWordWrap(True)
+        self.db_description.setStyleSheet("color: #5d6d7e; font-style: italic; padding: 5px; background-color: #f8f9fa; border-radius: 3px; margin-top: 5px;")
+        self.update_database_description()
+        
+        # Popular databases quick access
+        popular_layout = QHBoxLayout()
+        popular_label = QLabel("Popular:")
+        popular_label.setStyleSheet("color: #7f8c8d; font-size: 10px;")
+        
+        popular_buttons = []
+        for db_name in ['swissprot', 'nr', 'pdb', 'refseq_protein']:
+            btn = QPushButton(db_name)
+            btn.setMaximumHeight(25)
+            btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #e8f4f8;
+                    border: 1px solid #3498db;
+                    border-radius: 3px;
+                    padding: 2px 8px;
+                    font-size: 10px;
+                    color: #2980b9;
+                }
+                QPushButton:hover {
+                    background-color: #3498db;
+                    color: white;
+                }
+            """)
+            btn.clicked.connect(lambda checked, db=db_name: self.db_combo.setCurrentText(db))
+            popular_buttons.append(btn)
+        
+        popular_layout.addWidget(popular_label)
+        for btn in popular_buttons:
+            popular_layout.addWidget(btn)
+        popular_layout.addStretch()
+        
+        db_layout.addLayout(db_header_layout)
         db_layout.addWidget(self.db_combo)
-        db_layout.addStretch()
+        db_layout.addWidget(self.db_description)
+        db_layout.addLayout(popular_layout)
         
         # Local database path
         local_db_layout = QHBoxLayout()
@@ -395,6 +592,16 @@ class BLASTPage(QWidget):
         layout.addWidget(self.output_text)
         
         self.setLayout(layout)
+    
+    def on_database_changed(self):
+        """Update database description when selection changes"""
+        self.update_database_description()
+    
+    def update_database_description(self):
+        """Update the database description label"""
+        current_db = self.db_combo.currentText()
+        description = NCBI_DATABASES.get(current_db, "Database information not available")
+        self.db_description.setText(f"📋 {description}")
     
     def on_database_source_changed(self):
         """Enable/disable local database options based on remote checkbox"""
