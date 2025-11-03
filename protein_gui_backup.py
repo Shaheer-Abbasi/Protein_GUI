@@ -334,7 +334,8 @@ class MMseqsWorker(QThread):
                 f.write(f">query\n{self.sequence}\n")
             
             # MMseqs2 executable path
-            mmseqs_path = r'C:\Users\abbas\Downloads\mmseqs-win64\mmseqs\bin\mmseqs.exe'
+            # mmseqs_path = r'C:\Users\abbas\Downloads\mmseqs-win64\mmseqs\bin\mmseqs.exe'
+            mmseqs_path = r'C:\Users\18329\MMSeqs2\mmseqs-win64\mmseqs\bin\mmseqs.exe'
             
             # Create MMseqs2 database from query
             query_db = os.path.join(temp_dir, 'queryDB')

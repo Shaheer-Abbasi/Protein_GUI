@@ -16,7 +16,8 @@ def detect_mmseqs_path():
         subprocess.check_output(["mmseqs", "--help"], stderr=subprocess.STDOUT)
         return "mmseqs"
     except Exception:
-        fallback = r"C:\Users\abbas\Downloads\mmseqs-win64\mmseqs.exe"
+        #fallback = r"C:\Users\abbas\Downloads\mmseqs-win64\mmseqs.exe"
+        fallback = r"C:\Users\18329\MMSeqs2\mmseqs-win64\mmseqs\bin"
         if os.path.exists(fallback):
             return fallback
         return None

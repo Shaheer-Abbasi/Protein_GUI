@@ -1,15 +1,10 @@
-import sys
-import subprocess
-import tempfile
 import os
-from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QTextEdit, QPushButton, QLabel, QComboBox, QHBoxLayout, QCheckBox, QLineEdit, QFileDialog, QGroupBox, QStackedWidget, QFrame, QGridLayout, QCompleter
-from PyQt5.QtCore import QThread, pyqtSignal, Qt, QStringListModel, QSortFilterProxyModel
-from PyQt5.QtGui import QFont, QPixmap
-from Bio.Blast import NCBIXML
-from Bio import SeqIO
-from io import StringIO
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel, QComboBox, QHBoxLayout, QCheckBox, QLineEdit, QFileDialog, QGroupBox
+from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtGui import QFont
 
 from core.db_definitions import NCBI_DATABASES
+from core.blast_worker import BLASTWorker
 
 class BLASTPage(QWidget):
     """BLAST analysis page widget"""
