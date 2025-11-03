@@ -1,7 +1,11 @@
+"""Worker thread for running MMseqs2 searches via WSL"""
 import subprocess
 import tempfile
 import os
+import shutil
 from PyQt5.QtCore import QThread, pyqtSignal
+
+from core.wsl_utils import run_wsl_command, windows_path_to_wsl, WSLError
 
 
 class MMseqsWorker(QThread):
@@ -12,78 +16,78 @@ class MMseqsWorker(QThread):
     def __init__(self, sequence, database_path, sensitivity="sensitive"):
         super().__init__()
         self.sequence = sequence
-        self.database_path = database_path
+        self.database_path = database_path  # Windows path
         self.sensitivity = sensitivity
     
     def run(self):
         try:
             # Create temporary directory for MMseqs2 work
-            temp_dir = tempfile.mkdtemp(prefix='mmseqs_')
+            temp_dir_windows = tempfile.mkdtemp(prefix='mmseqs_search_')
             
             # Create query FASTA file
-            query_fasta = os.path.join(temp_dir, 'query.fasta')
-            with open(query_fasta, 'w') as f:
+            query_fasta_windows = os.path.join(temp_dir_windows, 'query.fasta')
+            with open(query_fasta_windows, 'w') as f:
                 f.write(f">query\n{self.sequence}\n")
             
-            # MMseqs2 executable path
-            #mmseqs_path = r'C:\Users\abbas\Downloads\mmseqs-win64\mmseqs\bin\mmseqs.exe'
-            mmseqs_path = r'C:\Users\18329\MMSeqs2\mmseqs-win64\mmseqs\bin\mmseqs.exe'
+            # Convert paths to WSL
+            temp_dir_wsl = windows_path_to_wsl(temp_dir_windows)
+            query_fasta_wsl = windows_path_to_wsl(query_fasta_windows)
+            database_wsl = windows_path_to_wsl(self.database_path)
             
             # Create MMseqs2 database from query
-            query_db = os.path.join(temp_dir, 'queryDB')
-            result_db = os.path.join(temp_dir, 'resultDB')
-            tmp_folder = os.path.join(temp_dir, 'tmp')
-            os.makedirs(tmp_folder, exist_ok=True)
+            query_db_wsl = f"{temp_dir_wsl}/queryDB"
+            result_db_wsl = f"{temp_dir_wsl}/resultDB"
+            tmp_folder_wsl = f"{temp_dir_wsl}/tmp"
+            output_file_wsl = f"{temp_dir_wsl}/results.m8"
+            
+            # Create tmp folder
+            tmp_folder_windows = os.path.join(temp_dir_windows, 'tmp')
+            os.makedirs(tmp_folder_windows, exist_ok=True)
             
             # Step 1: Create query database
-            cmd_createdb = [mmseqs_path, 'createdb', query_fasta, query_db]
-            result = subprocess.run(cmd_createdb, capture_output=True, text=True)
+            cmd_createdb = f'mmseqs createdb "{query_fasta_wsl}" "{query_db_wsl}"'
+            result = run_wsl_command(cmd_createdb, timeout=60)
+            
             if result.returncode != 0:
                 self.error.emit(f"Error creating query database:\n{result.stderr}")
+                shutil.rmtree(temp_dir_windows, ignore_errors=True)
                 return
             
-            # Step 2: Run search (Windows-compatible, no bash scripts)
-            cmd_search = [
-                mmseqs_path, 'search',
-                query_db,
-                self.database_path,
-                result_db,
-                tmp_folder,
-                '-s', self.get_sensitivity_value()
-            ]
+            # Step 2: Run search
+            sensitivity_value = self.get_sensitivity_value()
+            cmd_search = f'mmseqs search "{query_db_wsl}" "{database_wsl}" "{result_db_wsl}" "{tmp_folder_wsl}" -s {sensitivity_value}'
             
-            result = subprocess.run(cmd_search, capture_output=True, text=True, timeout=300)
+            result = run_wsl_command(cmd_search, timeout=300)  # 5 minute timeout
+            
             if result.returncode != 0:
                 self.error.emit(f"MMseqs2 search error:\n{result.stderr}\n\nStdout:\n{result.stdout}")
+                shutil.rmtree(temp_dir_windows, ignore_errors=True)
                 return
             
             # Step 3: Convert results to readable format
-            output_file = os.path.join(temp_dir, 'results.m8')
-            cmd_convertalis = [
-                mmseqs_path, 'convertalis',
-                query_db,
-                self.database_path,
-                result_db,
-                output_file,
-                '--format-output', 'query,target,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits'
-            ]
+            # Include theader to get target description (e.g., "Cytochrome c")
+            cmd_convertalis = f'mmseqs convertalis "{query_db_wsl}" "{database_wsl}" "{result_db_wsl}" "{output_file_wsl}" --format-output "query,target,theader,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits"'
             
-            result = subprocess.run(cmd_convertalis, capture_output=True, text=True, timeout=60)
+            result = run_wsl_command(cmd_convertalis, timeout=60)
+            
             if result.returncode != 0:
                 self.error.emit(f"Error converting results:\n{result.stderr}")
+                shutil.rmtree(temp_dir_windows, ignore_errors=True)
                 return
             
             # Read and format results
-            formatted_results = self.format_results(output_file, result.stdout, result.stderr)
+            output_file_windows = os.path.join(temp_dir_windows, 'results.m8')
+            formatted_results = self.format_results(output_file_windows, result.stdout, result.stderr)
             
             # Cleanup
-            import shutil
-            shutil.rmtree(temp_dir, ignore_errors=True)
+            shutil.rmtree(temp_dir_windows, ignore_errors=True)
             
             self.finished.emit(formatted_results)
             
         except subprocess.TimeoutExpired:
             self.error.emit("MMseqs2 search timed out after 5 minutes.")
+        except WSLError as e:
+            self.error.emit(f"WSL error: {str(e)}")
         except Exception as e:
             import traceback
             self.error.emit(f"Error: {str(e)}\n\n{traceback.format_exc()}")
@@ -106,12 +110,6 @@ class MMseqsWorker(QThread):
         formatted.append("=" * 80)
         formatted.append("")
         
-        # Add any stdout/stderr information
-        if stdout.strip():
-            formatted.append("Search Information:")
-            formatted.append(stdout.strip())
-            formatted.append("")
-        
         # Read and parse results file
         try:
             if os.path.exists(results_file) and os.path.getsize(results_file) > 0:
@@ -123,21 +121,33 @@ class MMseqsWorker(QThread):
                     formatted.append("-" * 80)
                     formatted.append("")
                     
-                    # Header
-                    formatted.append("Columns: Query | Target | Identity% | AlnLen | Mismatch | GapOpen | QStart | QEnd | TStart | TEnd | E-value | BitScore")
-                    formatted.append("-" * 80)
-                    
                     for i, line in enumerate(lines[:20], 1):  # Limit to top 20 hits
-                        formatted.append(f"\n#{i}. {line.strip()}")
-                        
-                        # Parse the tab-separated values for better formatting
+                        # Parse the tab-separated values
                         fields = line.strip().split('\t')
-                        if len(fields) >= 12:
-                            formatted.append(f"   Target: {fields[1]}")
-                            formatted.append(f"   Identity: {fields[2]}%")
-                            formatted.append(f"   Alignment Length: {fields[3]}")
-                            formatted.append(f"   E-value: {fields[10]}")
-                            formatted.append(f"   Bit Score: {fields[11]}")
+                        if len(fields) >= 13:
+                            # Fields: query, target_acc, target_desc, pident, alnlen, mismatch, gapopen, qstart, qend, tstart, tend, evalue, bits
+                            target_acc = fields[1]
+                            target_desc = fields[2]
+                            identity = fields[3]
+                            alnlen = fields[4]
+                            qstart = fields[7]
+                            qend = fields[8]
+                            tstart = fields[9]
+                            tend = fields[10]
+                            evalue = fields[11]
+                            bits = fields[12]
+                            
+                            formatted.append(f"\n#{i}. {target_desc}")
+                            formatted.append(f"   Accession: {target_acc}")
+                            formatted.append(f"   Identity: {identity}%")
+                            formatted.append(f"   Alignment Length: {alnlen} aa")
+                            formatted.append(f"   Query Position: {qstart}-{qend}")
+                            formatted.append(f"   Target Position: {tstart}-{tend}")
+                            formatted.append(f"   E-value: {evalue}")
+                            formatted.append(f"   Bit Score: {bits}")
+                        else:
+                            # Fallback for unexpected format
+                            formatted.append(f"\n#{i}. {line.strip()}")
                     
                     if len(lines) > 20:
                         formatted.append(f"\n... and {len(lines) - 20} more hits (showing top 20)")
