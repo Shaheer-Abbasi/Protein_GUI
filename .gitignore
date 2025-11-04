@@ -73,3 +73,4 @@ blast_databases/
 
 # MMseqs2 databases (converted databases and status)
 mmseqs_databases/
+nr.001/
