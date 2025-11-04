@@ -70,3 +70,6 @@ blast_databases/
 *.btd
 *.bti
 *.sqlite3
+
+# MMseqs2 databases (converted databases and status)
+mmseqs_databases/
