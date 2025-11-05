@@ -1,6 +1,7 @@
 import os
+import time
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel, QComboBox, QHBoxLayout, QCheckBox, QLineEdit, QFileDialog, QGroupBox
-from PyQt5.QtCore import pyqtSignal
+from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont
 
 from core.db_definitions import NCBI_DATABASES
@@ -13,6 +14,7 @@ class BLASTPage(QWidget):
     def __init__(self):
         super().__init__()
         self.blast_worker = None
+        self.search_start_time = None
         self.init_ui()
     
     def init_ui(self):
@@ -184,9 +186,76 @@ class BLASTPage(QWidget):
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #7f8c8d; font-weight: bold;")
         
+        # Summary statistics panel
+        self.summary_panel = QWidget()
+        summary_layout = QHBoxLayout()
+        summary_layout.setContentsMargins(0, 10, 0, 10)
+        
+        self.summary_panel.setStyleSheet("""
+            QWidget {
+                background-color: #ecf0f1;
+                border-radius: 8px;
+                padding: 10px;
+            }
+            QLabel {
+                background-color: transparent;
+            }
+        """)
+        
+        # Create stat boxes
+        self.stat_hits = QLabel("—")
+        self.stat_best_eval = QLabel("—")
+        self.stat_avg_identity = QLabel("—")
+        self.stat_search_time = QLabel("—")
+        
+        for stat_label in [self.stat_hits, self.stat_best_eval, self.stat_avg_identity, self.stat_search_time]:
+            stat_label.setAlignment(Qt.AlignCenter)
+            stat_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #27ae60;")
+        
+        # Create labels for stat descriptions
+        hits_box = QVBoxLayout()
+        hits_label = QLabel("Total Hits")
+        hits_label.setAlignment(Qt.AlignCenter)
+        hits_label.setStyleSheet("font-size: 11px; color: #7f8c8d;")
+        hits_box.addWidget(self.stat_hits)
+        hits_box.addWidget(hits_label)
+        
+        eval_box = QVBoxLayout()
+        eval_label = QLabel("Best E-value")
+        eval_label.setAlignment(Qt.AlignCenter)
+        eval_label.setStyleSheet("font-size: 11px; color: #7f8c8d;")
+        eval_box.addWidget(self.stat_best_eval)
+        eval_box.addWidget(eval_label)
+        
+        identity_box = QVBoxLayout()
+        identity_label = QLabel("Avg Identity")
+        identity_label.setAlignment(Qt.AlignCenter)
+        identity_label.setStyleSheet("font-size: 11px; color: #7f8c8d;")
+        identity_box.addWidget(self.stat_avg_identity)
+        identity_box.addWidget(identity_label)
+        
+        time_box = QVBoxLayout()
+        time_label = QLabel("Search Time")
+        time_label.setAlignment(Qt.AlignCenter)
+        time_label.setStyleSheet("font-size: 11px; color: #7f8c8d;")
+        time_box.addWidget(self.stat_search_time)
+        time_box.addWidget(time_label)
+        
+        summary_layout.addLayout(hits_box)
+        summary_layout.addSpacing(20)
+        summary_layout.addLayout(eval_box)
+        summary_layout.addSpacing(20)
+        summary_layout.addLayout(identity_box)
+        summary_layout.addSpacing(20)
+        summary_layout.addLayout(time_box)
+        
+        self.summary_panel.setLayout(summary_layout)
+        self.summary_panel.hide()  # Hidden until we have results
+        
         self.output_label = QLabel("Results:")
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
+        self.output_text.setAcceptRichText(True)  # Enable HTML rendering
         
         # Add widgets to layout
         layout.addLayout(header_layout)
@@ -195,6 +264,7 @@ class BLASTPage(QWidget):
         layout.addWidget(db_group)
         layout.addWidget(self.process_button)
         layout.addWidget(self.status_label)
+        layout.addWidget(self.summary_panel)  # Add summary panel
         layout.addWidget(self.output_label)
         layout.addWidget(self.output_text)
         
@@ -272,19 +342,80 @@ class BLASTPage(QWidget):
             local_db_path = ""  # Will use default
         
         # Start BLAST in background thread
+        self.search_start_time = time.time()
         self.blast_worker = BLASTWorker(sequence, database, use_remote, local_db_path)
         self.blast_worker.finished.connect(self.on_blast_finished)
         self.blast_worker.error.connect(self.on_blast_error)
         self.blast_worker.start()
     
+    def extract_stats_from_html(self, html_results):
+        """Extract statistics from HTML results"""
+        import re
+        
+        # Count hits
+        hits_match = re.search(r'Found (\d+) significant alignment', html_results)
+        total_hits = int(hits_match.group(1)) if hits_match else 0
+        
+        # Extract all E-values
+        evalue_matches = re.findall(r'E-value:</span> <b[^>]*>([\d\.e\-+]+)</b>', html_results)
+        best_evalue = min([float(e) for e in evalue_matches]) if evalue_matches else None
+        
+        # Extract all identity percentages
+        identity_matches = re.findall(r'Identity:</span> <b[^>]*>\d+/\d+ \(([\d\.]+)%\)</b>', html_results)
+        avg_identity = sum([float(i) for i in identity_matches]) / len(identity_matches) if identity_matches else 0
+        
+        return total_hits, best_evalue, avg_identity
+    
+    def update_summary_panel(self, total_hits, best_evalue, avg_identity, search_time):
+        """Update the summary statistics panel"""
+        self.stat_hits.setText(str(total_hits))
+        
+        if best_evalue is not None:
+            if best_evalue < 1e-100:
+                self.stat_best_eval.setText(f"{best_evalue:.1e}")
+                self.stat_best_eval.setStyleSheet("font-size: 18px; font-weight: bold; color: #27ae60;")
+            elif best_evalue < 1e-10:
+                self.stat_best_eval.setText(f"{best_evalue:.1e}")
+                self.stat_best_eval.setStyleSheet("font-size: 18px; font-weight: bold; color: #f39c12;")
+            else:
+                self.stat_best_eval.setText(f"{best_evalue:.1e}")
+                self.stat_best_eval.setStyleSheet("font-size: 18px; font-weight: bold; color: #e67e22;")
+        else:
+            self.stat_best_eval.setText("N/A")
+            self.stat_best_eval.setStyleSheet("font-size: 18px; font-weight: bold; color: #95a5a6;")
+        
+        if avg_identity > 0:
+            self.stat_avg_identity.setText(f"{avg_identity:.1f}%")
+            if avg_identity >= 70:
+                self.stat_avg_identity.setStyleSheet("font-size: 18px; font-weight: bold; color: #27ae60;")
+            elif avg_identity >= 50:
+                self.stat_avg_identity.setStyleSheet("font-size: 18px; font-weight: bold; color: #f39c12;")
+            else:
+                self.stat_avg_identity.setStyleSheet("font-size: 18px; font-weight: bold; color: #e67e22;")
+        else:
+            self.stat_avg_identity.setText("N/A")
+            self.stat_avg_identity.setStyleSheet("font-size: 18px; font-weight: bold; color: #95a5a6;")
+        
+        self.stat_search_time.setText(f"{search_time:.1f}s")
+        
+        self.summary_panel.show()
+    
     def on_blast_finished(self, results):
         """Handle BLAST results"""
-        self.output_text.setText(results)
+        search_time = time.time() - self.search_start_time if self.search_start_time else 0
+        
+        # Extract statistics and update summary panel
+        total_hits, best_evalue, avg_identity = self.extract_stats_from_html(results)
+        self.update_summary_panel(total_hits, best_evalue, avg_identity, search_time)
+        
+        # Display HTML results
+        self.output_text.setHtml(results)
         self.status_label.setText("Search complete!")
         self.process_button.setEnabled(True)
     
     def on_blast_error(self, error_msg):
         """Handle BLAST errors"""
-        self.output_text.setText(f"Error running BLAST:\n\n{error_msg}")
+        self.summary_panel.hide()
+        self.output_text.setPlainText(f"Error running BLAST:\n\n{error_msg}")
         self.status_label.setText("Error occurred")
         self.process_button.setEnabled(True)

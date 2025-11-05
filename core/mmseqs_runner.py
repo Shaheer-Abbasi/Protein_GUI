@@ -102,13 +102,59 @@ class MMseqsWorker(QThread):
         }
         return sensitivity_map.get(self.sensitivity, "5.7")
     
+    def get_evalue_color(self, evalue_str):
+        """Get color based on E-value (lower is better)"""
+        try:
+            evalue = float(evalue_str)
+            if evalue < 1e-100:
+                return "#27ae60"  # Excellent - green
+            elif evalue < 1e-50:
+                return "#2ecc71"  # Very good - light green
+            elif evalue < 1e-10:
+                return "#f39c12"  # Good - orange
+            elif evalue < 1e-5:
+                return "#e67e22"  # Moderate - dark orange
+            else:
+                return "#e74c3c"  # Poor - red
+        except:
+            return "#7f8c8d"  # Default gray
+    
+    def get_identity_color(self, identity_str):
+        """Get color based on identity percentage"""
+        try:
+            identity = float(identity_str)
+            if identity >= 90:
+                return "#27ae60"  # Excellent - green
+            elif identity >= 70:
+                return "#2ecc71"  # Very good - light green
+            elif identity >= 50:
+                return "#f39c12"  # Good - orange
+            elif identity >= 30:
+                return "#e67e22"  # Moderate - dark orange
+            else:
+                return "#e74c3c"  # Poor - red
+        except:
+            return "#7f8c8d"  # Default gray
+    
     def format_results(self, results_file, stdout, stderr):
-        """Format MMseqs2 results for display"""
-        formatted = []
-        formatted.append("=" * 80)
-        formatted.append("MMSEQS2 SEARCH RESULTS")
-        formatted.append("=" * 80)
-        formatted.append("")
+        """Format MMseqs2 results for display as HTML"""
+        html = []
+        html.append('<html><head><style>')
+        html.append('body { font-family: "Courier New", monospace; font-size: 12px; }')
+        html.append('.header { background-color: #8e44ad; color: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; }')
+        html.append('.header h1 { margin: 0; font-size: 20px; }')
+        html.append('.info { background-color: #ecf0f1; padding: 10px; border-radius: 5px; margin-bottom: 15px; }')
+        html.append('.hit { background-color: #ffffff; border: 1px solid #bdc3c7; padding: 15px; margin-bottom: 15px; border-radius: 5px; }')
+        html.append('.hit-title { font-size: 14px; font-weight: bold; color: #2c3e50; margin-bottom: 10px; }')
+        html.append('.stats { margin: 10px 0; }')
+        html.append('.stat-row { margin: 5px 0; }')
+        html.append('.stat-label { font-weight: bold; color: #7f8c8d; }')
+        html.append('.no-results { color: #95a5a6; font-style: italic; text-align: center; padding: 30px; }')
+        html.append('</style></head><body>')
+        
+        html.append(f'<div class="header">')
+        html.append(f'<h1>MMSEQS2 SEARCH RESULTS</h1>')
+        html.append(f'</div>')
         
         # Read and parse results file
         try:
@@ -117,9 +163,11 @@ class MMseqsWorker(QThread):
                     lines = f.readlines()
                 
                 if lines:
-                    formatted.append(f"Found {len(lines)} alignment(s)")
-                    formatted.append("-" * 80)
-                    formatted.append("")
+                    html.append(f'<div style="background-color: #d5f4e6; padding: 10px; border-radius: 5px; margin-bottom: 15px;">')
+                    html.append(f'<b>✓ Found {len(lines)} alignment(s)</b>')
+                    if len(lines) > 20:
+                        html.append(f' <span style="color: #7f8c8d;">(showing top 20)</span>')
+                    html.append(f'</div>')
                     
                     for i, line in enumerate(lines[:20], 1):  # Limit to top 20 hits
                         # Parse the tab-separated values
@@ -137,29 +185,33 @@ class MMseqsWorker(QThread):
                             evalue = fields[11]
                             bits = fields[12]
                             
-                            formatted.append(f"\n#{i}. {target_desc}")
-                            formatted.append(f"   Accession: {target_acc}")
-                            formatted.append(f"   Identity: {identity}%")
-                            formatted.append(f"   Alignment Length: {alnlen} aa")
-                            formatted.append(f"   Query Position: {qstart}-{qend}")
-                            formatted.append(f"   Target Position: {tstart}-{tend}")
-                            formatted.append(f"   E-value: {evalue}")
-                            formatted.append(f"   Bit Score: {bits}")
+                            evalue_color = self.get_evalue_color(evalue)
+                            identity_color = self.get_identity_color(identity)
+                            
+                            html.append(f'<div class="hit">')
+                            html.append(f'<div class="hit-title">#{i}. {target_desc}</div>')
+                            html.append(f'<span style="color: #7f8c8d;">Accession: {target_acc}</span>')
+                            
+                            html.append(f'<div class="stats">')
+                            html.append(f'<div class="stat-row"><span class="stat-label">Identity:</span> <b style="color: {identity_color};">{identity}%</b></div>')
+                            html.append(f'<div class="stat-row"><span class="stat-label">E-value:</span> <b style="color: {evalue_color};">{evalue}</b></div>')
+                            html.append(f'<div class="stat-row"><span class="stat-label">Bit Score:</span> <b>{bits}</b></div>')
+                            html.append(f'<div class="stat-row"><span class="stat-label">Alignment Length:</span> {alnlen} amino acids</div>')
+                            html.append(f'<div class="stat-row"><span class="stat-label">Query Position:</span> {qstart}-{qend}</div>')
+                            html.append(f'<div class="stat-row"><span class="stat-label">Target Position:</span> {tstart}-{tend}</div>')
+                            html.append(f'</div>')
+                            
+                            html.append(f'</div>')
                         else:
                             # Fallback for unexpected format
-                            formatted.append(f"\n#{i}. {line.strip()}")
-                    
-                    if len(lines) > 20:
-                        formatted.append(f"\n... and {len(lines) - 20} more hits (showing top 20)")
+                            html.append(f'<div class="hit">#{i}. {line.strip()}</div>')
                 else:
-                    formatted.append("No significant alignments found.")
+                    html.append(f'<div class="no-results">No significant alignments found.</div>')
             else:
-                formatted.append("No results file generated or file is empty.")
+                html.append(f'<div class="no-results">No results file generated or file is empty.</div>')
                 
         except Exception as e:
-            formatted.append(f"Error reading results: {str(e)}")
+            html.append(f'<div style="color: red; padding: 20px;">Error reading results: {str(e)}</div>')
         
-        formatted.append("")
-        formatted.append("=" * 80)
-        
-        return "\n".join(formatted)
+        html.append('</body></html>')
+        return ''.join(html)

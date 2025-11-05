@@ -70,54 +70,107 @@ class BLASTWorker(QThread):
         except Exception as e:
             self.error.emit(f"Error: {str(e)}")
     
+    def get_evalue_color(self, evalue):
+        """Get color based on E-value (lower is better)"""
+        if evalue < 1e-100:
+            return "#27ae60"  # Excellent - green
+        elif evalue < 1e-50:
+            return "#2ecc71"  # Very good - light green
+        elif evalue < 1e-10:
+            return "#f39c12"  # Good - orange
+        elif evalue < 1e-5:
+            return "#e67e22"  # Moderate - dark orange
+        else:
+            return "#e74c3c"  # Poor - red
+    
+    def get_identity_color(self, identity_percent):
+        """Get color based on identity percentage"""
+        if identity_percent >= 90:
+            return "#27ae60"  # Excellent - green
+        elif identity_percent >= 70:
+            return "#2ecc71"  # Very good - light green
+        elif identity_percent >= 50:
+            return "#f39c12"  # Good - orange
+        elif identity_percent >= 30:
+            return "#e67e22"  # Moderate - dark orange
+        else:
+            return "#e74c3c"  # Poor - red
+    
     def parse_blast_xml(self, xml_file_path):
-        """Parse BLAST XML output using Biopython"""
+        """Parse BLAST XML output using Biopython and format as HTML"""
         try:
             with open(xml_file_path, 'r') as result_handle:
                 blast_records = NCBIXML.parse(result_handle)
                 
-                formatted_results = []
-                formatted_results.append("=" * 80)
-                formatted_results.append("BLASTP SEARCH RESULTS")
-                formatted_results.append("=" * 80)
+                html = []
+                html.append('<html><head><style>')
+                html.append('body { font-family: "Courier New", monospace; font-size: 12px; }')
+                html.append('.header { background-color: #34495e; color: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; }')
+                html.append('.header h1 { margin: 0; font-size: 20px; }')
+                html.append('.info { background-color: #ecf0f1; padding: 10px; border-radius: 5px; margin-bottom: 15px; }')
+                html.append('.hit { background-color: #ffffff; border: 1px solid #bdc3c7; padding: 15px; margin-bottom: 15px; border-radius: 5px; }')
+                html.append('.hit-title { font-size: 14px; font-weight: bold; color: #2c3e50; margin-bottom: 10px; }')
+                html.append('.stats { margin: 10px 0; }')
+                html.append('.stat-row { margin: 5px 0; }')
+                html.append('.stat-label { font-weight: bold; color: #7f8c8d; }')
+                html.append('.alignment { background-color: #f8f9fa; padding: 10px; border-radius: 3px; font-family: "Courier New", monospace; margin-top: 10px; }')
+                html.append('.no-results { color: #95a5a6; font-style: italic; text-align: center; padding: 30px; }')
+                html.append('</style></head><body>')
                 
                 for blast_record in blast_records:
-                    formatted_results.append(f"\nQuery: {blast_record.query}")
-                    formatted_results.append(f"Query Length: {blast_record.query_length} amino acids")
-                    formatted_results.append(f"Database: {blast_record.database}")
-                    formatted_results.append(f"Number of sequences in database: {blast_record.database_sequences:,}")
-                    formatted_results.append("\n" + "-" * 80)
+                    html.append(f'<div class="header">')
+                    html.append(f'<h1>BLASTP SEARCH RESULTS</h1>')
+                    html.append(f'</div>')
+                    
+                    html.append(f'<div class="info">')
+                    html.append(f'<b>Query:</b> {blast_record.query}<br>')
+                    html.append(f'<b>Query Length:</b> {blast_record.query_length} amino acids<br>')
+                    html.append(f'<b>Database:</b> {blast_record.database}<br>')
+                    html.append(f'<b>Sequences in Database:</b> {blast_record.database_sequences:,}')
+                    html.append(f'</div>')
                     
                     if blast_record.alignments:
-                        formatted_results.append(f"Found {len(blast_record.alignments)} significant alignments:")
-                        formatted_results.append("-" * 80)
+                        html.append(f'<div style="background-color: #d5f4e6; padding: 10px; border-radius: 5px; margin-bottom: 15px;">')
+                        html.append(f'<b>✓ Found {len(blast_record.alignments)} significant alignment(s)</b>')
+                        html.append(f'</div>')
                         
                         for i, alignment in enumerate(blast_record.alignments, 1):
-                            formatted_results.append(f"\n#{i}. {alignment.title}")
-                            formatted_results.append(f"Length: {alignment.length} amino acids")
+                            html.append(f'<div class="hit">')
+                            html.append(f'<div class="hit-title">#{i}. {alignment.title}</div>')
+                            html.append(f'<span style="color: #7f8c8d;">Length: {alignment.length} amino acids</span>')
                             
                             # Get the best HSP (High-scoring Segment Pair)
                             if alignment.hsps:
                                 hsp = alignment.hsps[0]  # Best HSP
+                                identity_percent = (hsp.identities/hsp.align_length)*100
+                                positive_percent = (hsp.positives/hsp.align_length)*100
+                                gap_percent = (hsp.gaps/hsp.align_length)*100
                                 
-                                formatted_results.append(f"\nBest Hit Statistics:")
-                                formatted_results.append(f"  Score: {hsp.score} bits")
-                                formatted_results.append(f"  E-value: {hsp.expect:.2e}")
-                                formatted_results.append(f"  Identity: {hsp.identities}/{hsp.align_length} ({hsp.identities/hsp.align_length*100:.1f}%)")
-                                formatted_results.append(f"  Positives: {hsp.positives}/{hsp.align_length} ({hsp.positives/hsp.align_length*100:.1f}%)")
-                                formatted_results.append(f"  Gaps: {hsp.gaps}/{hsp.align_length} ({hsp.gaps/hsp.align_length*100:.1f}%)")
+                                evalue_color = self.get_evalue_color(hsp.expect)
+                                identity_color = self.get_identity_color(identity_percent)
+                                
+                                html.append(f'<div class="stats">')
+                                html.append(f'<div class="stat-row"><span class="stat-label">Score:</span> <b>{hsp.score}</b> bits</div>')
+                                html.append(f'<div class="stat-row"><span class="stat-label">E-value:</span> <b style="color: {evalue_color};">{hsp.expect:.2e}</b></div>')
+                                html.append(f'<div class="stat-row"><span class="stat-label">Identity:</span> <b style="color: {identity_color};">{hsp.identities}/{hsp.align_length} ({identity_percent:.1f}%)</b></div>')
+                                html.append(f'<div class="stat-row"><span class="stat-label">Positives:</span> <b>{hsp.positives}/{hsp.align_length} ({positive_percent:.1f}%)</b></div>')
+                                html.append(f'<div class="stat-row"><span class="stat-label">Gaps:</span> {hsp.gaps}/{hsp.align_length} ({gap_percent:.1f}%)</div>')
+                                html.append(f'</div>')
                                 
                                 # Show alignment
-                                formatted_results.append(f"\nAlignment (Query: {hsp.query_start}-{hsp.query_end}, Subject: {hsp.sbjct_start}-{hsp.sbjct_end}):")
-                                formatted_results.append(f"Query: {hsp.query}")
-                                formatted_results.append(f"       {hsp.match}")
-                                formatted_results.append(f"Sbjct: {hsp.sbjct}")
-                                
-                            formatted_results.append("-" * 60)
+                                html.append(f'<div class="alignment">')
+                                html.append(f'<b>Alignment</b> (Query: {hsp.query_start}-{hsp.query_end}, Subject: {hsp.sbjct_start}-{hsp.sbjct_end})<br><br>')
+                                html.append(f'<span style="color: #2980b9;">Query:</span> {hsp.query}<br>')
+                                html.append(f'<span style="color: #7f8c8d;">      {hsp.match}</span><br>')
+                                html.append(f'<span style="color: #27ae60;">Sbjct:</span> {hsp.sbjct}')
+                                html.append(f'</div>')
+                            
+                            html.append(f'</div>')
                     else:
-                        formatted_results.append("No significant alignments found.")
+                        html.append(f'<div class="no-results">No significant alignments found.</div>')
                 
-                return "\n".join(formatted_results)
+                html.append('</body></html>')
+                return ''.join(html)
                 
         except Exception as e:
-            return f"Error parsing BLAST results: {str(e)}"
+            return f'<html><body><div style="color: red; padding: 20px;">Error parsing BLAST results: {str(e)}</div></body></html>'
