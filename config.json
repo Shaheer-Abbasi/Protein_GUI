@@ -1,0 +1,9 @@
+{
+  "blast_path": "blastp",
+  "mmseqs_available": true,
+  "blastdbcmd_available": true,
+  "databases_found": [
+    "refseq_protein",
+    "swissprot"
+  ]
+}

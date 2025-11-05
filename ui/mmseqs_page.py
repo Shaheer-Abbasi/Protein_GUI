@@ -246,9 +246,12 @@ class MMseqsPage(QWidget):
             for item in os.listdir(self.blast_db_dir):
                 db_folder = os.path.join(self.blast_db_dir, item)
                 if os.path.isdir(db_folder):
-                    # Check if the database files exist (look for .phr file)
-                    db_file = os.path.join(db_folder, item + ".phr")
-                    if os.path.exists(db_file):
+                    # Check if the database files exist
+                    # Look for .phr file (may be named dbname.phr or dbname.00.phr for multi-volume)
+                    db_file_single = os.path.join(db_folder, item + ".phr")
+                    db_file_multi = os.path.join(db_folder, item + ".00.phr")
+                    
+                    if os.path.exists(db_file_single) or os.path.exists(db_file_multi):
                         self.installed_databases.add(item)
             
             print(f"Scanned blast_databases: Found {len(self.installed_databases)} installed databases")

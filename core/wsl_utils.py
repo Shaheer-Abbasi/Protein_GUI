@@ -8,6 +8,18 @@ class WSLError(Exception):
     pass
 
 
+def warmup_wsl():
+    """Warm up WSL to avoid timeout on first command after boot"""
+    try:
+        subprocess.run(
+            ['wsl', 'echo', 'warmup'],
+            capture_output=True,
+            timeout=15
+        )
+    except:
+        pass
+
+
 def is_wsl_available():
     """Check if WSL is available on the system"""
     try:
@@ -15,7 +27,7 @@ def is_wsl_available():
             ['wsl', '--status'],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=15
         )
         return result.returncode == 0
     except (subprocess.TimeoutExpired, FileNotFoundError):
@@ -36,7 +48,7 @@ def check_wsl_command(command):
             ['wsl', 'which', command],
             capture_output=True,
             text=True,
-            timeout=5
+            timeout=30
         )
         if result.returncode == 0:
             return True, result.stdout.strip()
@@ -130,12 +142,15 @@ def check_mmseqs_installation():
     if not is_wsl_available():
         return False, None, None
     
+    # Warm up WSL once before checks
+    warmup_wsl()
+    
     exists, path = check_wsl_command('mmseqs')
     if not exists:
         return False, None, None
     
     try:
-        result = run_wsl_command(['mmseqs', 'version'], timeout=5)
+        result = run_wsl_command(['mmseqs', 'version'], timeout=30)
         if result.returncode == 0:
             version = result.stdout.strip()
             return True, version, path
@@ -154,12 +169,15 @@ def check_blastdbcmd_installation():
     if not is_wsl_available():
         return False, None, None
     
+    # Warm up WSL once before checks (if not already done)
+    warmup_wsl()
+    
     exists, path = check_wsl_command('blastdbcmd')
     if not exists:
         return False, None, None
     
     try:
-        result = run_wsl_command(['blastdbcmd', '-version'], timeout=5)
+        result = run_wsl_command(['blastdbcmd', '-version'], timeout=30)
         if result.returncode == 0:
             # Extract version from output
             version_line = result.stdout.split('\n')[0] if result.stdout else None
