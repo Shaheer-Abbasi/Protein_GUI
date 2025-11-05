@@ -4,6 +4,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QSt
 from ui.home_page import HomePage
 from ui.blast_page import BLASTPage
 from ui.mmseqs_page import MMseqsPage
+from ui.clustering_page import ClusteringPage
 
 
 class ProteinGUI(QMainWindow):
@@ -44,16 +45,19 @@ class ProteinGUI(QMainWindow):
         self.home_page = HomePage()
         self.blast_page = BLASTPage()
         self.mmseqs_page = MMseqsPage()
+        self.clustering_page = ClusteringPage()
         
         # Add pages to stack
         self.stacked_widget.addWidget(self.home_page)
         self.stacked_widget.addWidget(self.blast_page)
         self.stacked_widget.addWidget(self.mmseqs_page)
+        self.stacked_widget.addWidget(self.clustering_page)
         
         # Connect signals
         self.home_page.service_selected.connect(self.show_service_page)
         self.blast_page.back_requested.connect(self.show_home_page)
         self.mmseqs_page.back_requested.connect(self.show_home_page)
+        self.clustering_page.back_requested.connect(self.show_home_page)
         
         # Add stacked widget to main layout
         main_layout.addWidget(self.stacked_widget)
@@ -74,6 +78,9 @@ class ProteinGUI(QMainWindow):
         elif service == "mmseqs":
             self.stacked_widget.setCurrentWidget(self.mmseqs_page)
             self.setWindowTitle("Sen Lab - MMseqs2 Search")
+        elif service == "clustering":
+            self.stacked_widget.setCurrentWidget(self.clustering_page)
+            self.setWindowTitle("Sen Lab - MMseqs2 Clustering")
         # Add more services here in the future
 
 def main():

@@ -140,33 +140,41 @@ class HomePage(QWidget):
         
         services_layout.addWidget(mmseqs_container, 0, 1)
         
-        # Placeholder for future services (moved to row 1)
-        placeholder_button = QPushButton("More Tools Coming Soon...")
-        placeholder_button.setMinimumHeight(80)
-        placeholder_button.setEnabled(False)
-        placeholder_button.setStyleSheet("""
+        # Clustering service button
+        clustering_button = QPushButton("MMseqs2 Clustering")
+        clustering_button.setMinimumHeight(80)
+        clustering_button.setStyleSheet("""
             QPushButton {
-                background-color: #bdc3c7;
-                color: #7f8c8d;
+                background-color: #e67e22;
+                color: white;
                 border: none;
                 border-radius: 8px;
                 font-size: 14px;
                 font-weight: bold;
                 padding: 15px;
             }
+            QPushButton:hover {
+                background-color: #d35400;
+            }
+            QPushButton:pressed {
+                background-color: #ba4a00;
+            }
         """)
+        clustering_button.clicked.connect(lambda: self.service_selected.emit("clustering"))
         
-        placeholder_desc = QLabel("Additional bioinformatics tools\nwill be added in future updates")
-        placeholder_desc.setWordWrap(True)
-        placeholder_desc.setStyleSheet("color: #bdc3c7; margin-top: 10px; background: transparent;")
-        placeholder_desc.setAlignment(Qt.AlignCenter)
+        # Clustering description
+        clustering_desc = QLabel("Cluster protein sequences by similarity\nto identify redundancy and group related sequences")
+        clustering_desc.setWordWrap(True)
+        clustering_desc.setStyleSheet("color: #7f8c8d; margin-top: 10px; background: transparent;")
+        clustering_desc.setAlignment(Qt.AlignCenter)
         
-        placeholder_container = QWidget()
-        placeholder_container_layout = QVBoxLayout(placeholder_container)
-        placeholder_container_layout.addWidget(placeholder_button)
-        placeholder_container_layout.addWidget(placeholder_desc)
+        # Add Clustering service to grid
+        clustering_container = QWidget()
+        clustering_container_layout = QVBoxLayout(clustering_container)
+        clustering_container_layout.addWidget(clustering_button)
+        clustering_container_layout.addWidget(clustering_desc)
         
-        services_layout.addWidget(placeholder_container, 1, 0, 1, 2)  # Span 2 columns
+        services_layout.addWidget(clustering_container, 1, 0, 1, 2)  # Span 2 columns
         
         # Add everything to main layout
         layout.addWidget(welcome_frame)
