@@ -2,7 +2,7 @@ import os
 import time
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel, 
                              QComboBox, QHBoxLayout, QLineEdit, QFileDialog, QGroupBox, 
-                             QRadioButton, QButtonGroup, QMessageBox)
+                             QRadioButton, QButtonGroup, QMessageBox, QFrame)
 from PyQt5.QtCore import pyqtSignal, QTimer, Qt
 from PyQt5.QtGui import QFont
 
@@ -12,6 +12,9 @@ from core.db_conversion_manager import DatabaseConversionManager
 from core.db_conversion_worker import DatabaseConversionWorker
 from core.wsl_utils import is_wsl_available, check_mmseqs_installation, check_blastdbcmd_installation
 from ui.dialogs.conversion_progress_dialog import ConversionProgressDialog
+from ui.dialogs.protein_search_dialog import ProteinSearchDialog
+from utils.fasta_parser import FastaParser, FastaParseError
+from utils.export_manager import ResultsExporter, ExportError, show_export_error, show_export_success
 
 
 class MMseqsPage(QWidget):
@@ -27,6 +30,12 @@ class MMseqsPage(QWidget):
         self.installed_databases = set()  # Track which databases are installed
         self.custom_blast_db_path = None  # For user-selected BLAST database
         self.search_start_time = None
+        self.current_results_html = ""
+        self.current_query_info = {}
+        self.fasta_parser = FastaParser()
+        self.exporter = ResultsExporter()
+        self.loaded_sequences = []
+        self.current_sequence_metadata = {}
         self.init_ui()
         
         # Check WSL/MMseqs2 availability on startup
@@ -70,11 +79,157 @@ class MMseqsPage(QWidget):
         header_layout.addWidget(page_title)
         header_layout.addStretch()
         
-        # Input section
+        # Input Method Selection Group
+        input_method_group = QGroupBox("Sequence Input Method")
+        input_method_layout = QVBoxLayout()
+        
+        # Radio buttons for input method
+        method_buttons_layout = QHBoxLayout()
+        self.input_method_group = QButtonGroup()
+        
+        self.paste_radio = QRadioButton("Paste Sequence")
+        self.upload_radio = QRadioButton("Upload FASTA File")
+        self.search_radio = QRadioButton("Search Protein Database")
+        
+        self.paste_radio.setChecked(True)
+        
+        self.input_method_group.addButton(self.paste_radio, 1)
+        self.input_method_group.addButton(self.upload_radio, 2)
+        self.input_method_group.addButton(self.search_radio, 3)
+        
+        # Style radio buttons
+        radio_style = """
+            QRadioButton {
+                font-size: 12px;
+                font-weight: bold;
+                padding: 5px;
+            }
+            QRadioButton::indicator {
+                width: 15px;
+                height: 15px;
+            }
+        """
+        self.paste_radio.setStyleSheet(radio_style)
+        self.upload_radio.setStyleSheet(radio_style)
+        self.search_radio.setStyleSheet(radio_style)
+        
+        # Connect signals
+        self.paste_radio.toggled.connect(self._on_input_method_changed)
+        self.upload_radio.toggled.connect(self._on_input_method_changed)
+        self.search_radio.toggled.connect(self._on_input_method_changed)
+        
+        method_buttons_layout.addWidget(self.paste_radio)
+        method_buttons_layout.addWidget(self.upload_radio)
+        method_buttons_layout.addWidget(self.search_radio)
+        method_buttons_layout.addStretch()
+        
+        input_method_layout.addLayout(method_buttons_layout)
+        
+        # Container for different input widgets
+        self.input_container = QFrame()
+        self.input_container_layout = QVBoxLayout()
+        self.input_container_layout.setContentsMargins(0, 10, 0, 0)
+        
+        # --- Paste Input Section ---
+        self.paste_widget = QWidget()
+        paste_layout = QVBoxLayout()
+        paste_layout.setContentsMargins(0, 0, 0, 0)
+        
         self.input_label = QLabel("Enter protein sequence:")
         self.input_text = QTextEdit()
         self.input_text.setPlaceholderText("Paste your amino acid sequence here (single letter codes)...")
         self.input_text.setMaximumHeight(100)
+        self.input_text.textChanged.connect(self._update_sequence_counter)
+        
+        self.sequence_counter = QLabel("0 amino acids")
+        self.sequence_counter.setStyleSheet("color: #7f8c8d; font-size: 10px;")
+        
+        paste_layout.addWidget(self.input_label)
+        paste_layout.addWidget(self.input_text)
+        paste_layout.addWidget(self.sequence_counter)
+        self.paste_widget.setLayout(paste_layout)
+        
+        # --- Upload FASTA Section ---
+        self.upload_widget = QWidget()
+        upload_layout = QVBoxLayout()
+        upload_layout.setContentsMargins(0, 0, 0, 0)
+        
+        upload_button_layout = QHBoxLayout()
+        self.upload_fasta_button = QPushButton("📁 Choose FASTA File")
+        self.upload_fasta_button.clicked.connect(self._upload_fasta_file)
+        self.upload_fasta_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px 20px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+        """)
+        
+        self.fasta_file_label = QLabel("No file selected")
+        self.fasta_file_label.setStyleSheet("color: #7f8c8d; font-style: italic;")
+        
+        upload_button_layout.addWidget(self.upload_fasta_button)
+        upload_button_layout.addWidget(self.fasta_file_label)
+        upload_button_layout.addStretch()
+        
+        # Sequence selector for multi-FASTA
+        self.fasta_sequence_selector = QComboBox()
+        self.fasta_sequence_selector.setVisible(False)
+        self.fasta_sequence_selector.currentIndexChanged.connect(self._on_fasta_sequence_selected)
+        
+        upload_layout.addLayout(upload_button_layout)
+        upload_layout.addWidget(self.fasta_sequence_selector)
+        upload_layout.addWidget(QLabel("FASTA format: Header line starts with '>', followed by sequence lines"))
+        self.upload_widget.setLayout(upload_layout)
+        self.upload_widget.setVisible(False)
+        
+        # --- Search Database Section ---
+        self.search_widget = QWidget()
+        search_layout = QVBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        
+        search_button_layout = QHBoxLayout()
+        self.search_protein_button = QPushButton("🔍 Search Protein Database")
+        self.search_protein_button.clicked.connect(self._open_protein_search)
+        self.search_protein_button.setStyleSheet("""
+            QPushButton {
+                background-color: #9b59b6;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px 20px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #8e44ad;
+            }
+        """)
+        
+        self.protein_info_label = QLabel("Search AlphaFold/UniProt by protein name or UniProt ID")
+        self.protein_info_label.setStyleSheet("color: #7f8c8d; font-style: italic;")
+        
+        search_button_layout.addWidget(self.search_protein_button)
+        search_button_layout.addWidget(self.protein_info_label)
+        search_button_layout.addStretch()
+        
+        search_layout.addLayout(search_button_layout)
+        self.search_widget.setLayout(search_layout)
+        self.search_widget.setVisible(False)
+        
+        # Add all input widgets to container
+        self.input_container_layout.addWidget(self.paste_widget)
+        self.input_container_layout.addWidget(self.upload_widget)
+        self.input_container_layout.addWidget(self.search_widget)
+        self.input_container.setLayout(self.input_container_layout)
+        
+        input_method_layout.addWidget(self.input_container)
+        input_method_group.setLayout(input_method_layout)
         
         # Database and options selection group
         options_group = QGroupBox("Database Options")
@@ -286,23 +441,251 @@ class MMseqsPage(QWidget):
         self.summary_panel.setLayout(summary_layout)
         self.summary_panel.hide()  # Hidden until we have results
         
+        # Results section with export buttons
+        results_header_layout = QHBoxLayout()
         self.output_label = QLabel("Results:")
+        results_header_layout.addWidget(self.output_label)
+        results_header_layout.addStretch()
+        
+        # Export buttons
+        self.export_tsv_button = QPushButton("📥 Export as TSV")
+        self.export_csv_button = QPushButton("📥 Export as CSV")
+        
+        self.export_tsv_button.setEnabled(False)
+        self.export_csv_button.setEnabled(False)
+        
+        export_button_style = """
+            QPushButton {
+                background-color: #16a085;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 5px 10px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #138d75;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """
+        self.export_tsv_button.setStyleSheet(export_button_style)
+        self.export_csv_button.setStyleSheet(export_button_style)
+        
+        self.export_tsv_button.clicked.connect(lambda: self._export_results('tsv'))
+        self.export_csv_button.clicked.connect(lambda: self._export_results('csv'))
+        
+        results_header_layout.addWidget(self.export_tsv_button)
+        results_header_layout.addWidget(self.export_csv_button)
+        
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
         self.output_text.setAcceptRichText(True)  # Enable HTML rendering
         
         # Add widgets to layout
         layout.addLayout(header_layout)
-        layout.addWidget(self.input_label)
-        layout.addWidget(self.input_text)
+        layout.addWidget(input_method_group)
         layout.addWidget(options_group)
         layout.addWidget(self.process_button)
         layout.addWidget(self.status_label)
         layout.addWidget(self.summary_panel)  # Add summary panel
-        layout.addWidget(self.output_label)
+        layout.addLayout(results_header_layout)
         layout.addWidget(self.output_text)
 
         self.setLayout(layout)
+    
+    def _on_input_method_changed(self):
+        """Handle input method radio button changes"""
+        if self.paste_radio.isChecked():
+            self.paste_widget.setVisible(True)
+            self.upload_widget.setVisible(False)
+            self.search_widget.setVisible(False)
+        elif self.upload_radio.isChecked():
+            self.paste_widget.setVisible(False)
+            self.upload_widget.setVisible(True)
+            self.search_widget.setVisible(False)
+        elif self.search_radio.isChecked():
+            self.paste_widget.setVisible(False)
+            self.upload_widget.setVisible(False)
+            self.search_widget.setVisible(True)
+    
+    def _update_sequence_counter(self):
+        """Update the amino acid counter for pasted sequence"""
+        text = self.input_text.toPlainText().strip().upper()
+        # Remove whitespace
+        clean_text = ''.join(c for c in text if c.isalpha())
+        
+        count = len(clean_text)
+        self.sequence_counter.setText(f"{count} amino acids")
+        
+        # Validate and show warning colors
+        if count == 0:
+            self.sequence_counter.setStyleSheet("color: #7f8c8d; font-size: 10px;")
+        elif count < 10:
+            self.sequence_counter.setStyleSheet("color: #e74c3c; font-size: 10px; font-weight: bold;")
+        elif count > 10000:
+            self.sequence_counter.setStyleSheet("color: #e67e22; font-size: 10px; font-weight: bold;")
+        else:
+            self.sequence_counter.setStyleSheet("color: #27ae60; font-size: 10px; font-weight: bold;")
+    
+    def _upload_fasta_file(self):
+        """Open file dialog and load FASTA file"""
+        filepath, _ = QFileDialog.getOpenFile(
+            self,
+            "Open FASTA File",
+            "",
+            "FASTA Files (*.fasta *.fa *.fna *.ffn *.faa *.frn);;All Files (*)"
+        )
+        
+        if not filepath:
+            return
+        
+        try:
+            sequences = self.fasta_parser.parse_file(filepath)
+            
+            # Show warnings if any
+            if self.fasta_parser.has_warnings():
+                warnings_text = "\n".join(self.fasta_parser.get_warnings())
+                QMessageBox.warning(
+                    self,
+                    "FASTA Parsing Warnings",
+                    f"File loaded with warnings:\n\n{warnings_text}"
+                )
+            
+            self.loaded_sequences = sequences
+            filename = os.path.basename(filepath)
+            
+            if len(sequences) == 1:
+                # Single sequence - load directly
+                self.fasta_file_label.setText(f"✓ {filename} ({len(sequences[0].sequence)} aa)")
+                self.fasta_sequence_selector.setVisible(False)
+                
+                # Populate input_text for compatibility with existing code
+                self.input_text.setPlainText(sequences[0].sequence)
+                self.current_sequence_metadata = {
+                    'source': 'fasta_file',
+                    'filename': filename,
+                    'header': sequences[0].header,
+                    'id': sequences[0].id
+                }
+            else:
+                # Multiple sequences - show selector
+                self.fasta_file_label.setText(f"✓ {filename} ({len(sequences)} sequences)")
+                self.fasta_sequence_selector.clear()
+                
+                for seq in sequences:
+                    self.fasta_sequence_selector.addItem(
+                        f"{seq.id} ({len(seq.sequence)} aa)",
+                        seq
+                    )
+                
+                self.fasta_sequence_selector.setVisible(True)
+                # Trigger selection of first sequence
+                self._on_fasta_sequence_selected(0)
+            
+        except FastaParseError as e:
+            QMessageBox.critical(
+                self,
+                "FASTA Parsing Error",
+                f"Failed to parse FASTA file:\n\n{str(e)}"
+            )
+            self.fasta_file_label.setText("No file selected")
+    
+    def _on_fasta_sequence_selected(self, index):
+        """Handle selection of a sequence from multi-FASTA file"""
+        if index < 0 or not self.loaded_sequences:
+            return
+        
+        selected_seq = self.fasta_sequence_selector.itemData(index)
+        if selected_seq:
+            self.input_text.setPlainText(selected_seq.sequence)
+            self.current_sequence_metadata = {
+                'source': 'fasta_file',
+                'header': selected_seq.header,
+                'id': selected_seq.id
+            }
+    
+    def _open_protein_search(self):
+        """Open protein search dialog"""
+        dialog = ProteinSearchDialog(self)
+        dialog.sequence_selected.connect(self._on_protein_selected)
+        dialog.exec_()
+    
+    def _on_protein_selected(self, sequence, metadata):
+        """Handle protein selection from search dialog"""
+        # Show confirmation
+        reply = QMessageBox.question(
+            self,
+            "Load Sequence",
+            f"Load sequence for {metadata.get('protein_name', 'Unknown')}?\n\n"
+            f"UniProt ID: {metadata.get('uniprot_id', 'Unknown')}\n"
+            f"Organism: {metadata.get('organism', 'Unknown')}\n"
+            f"Length: {metadata.get('length', 0)} amino acids",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.input_text.setPlainText(sequence)
+            self.current_sequence_metadata = metadata
+            self.protein_info_label.setText(
+                f"✓ Loaded: {metadata.get('protein_name', 'Unknown')} "
+                f"({metadata.get('uniprot_id', 'Unknown')})"
+            )
+            self.protein_info_label.setStyleSheet("color: #27ae60; font-weight: bold;")
+    
+    def _export_results(self, format_type):
+        """Export results to TSV or CSV"""
+        if not self.current_results_html:
+            QMessageBox.warning(
+                self,
+                "No Results",
+                "No results available to export. Please run a search first."
+            )
+            return
+        
+        # Get default filename
+        query_name = self.current_sequence_metadata.get('id', 'query')
+        default_filename = self.exporter.get_default_filename('mmseqs', query_name)
+        
+        # Show save dialog
+        ext = format_type.upper()
+        filepath, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Save Results as {ext}",
+            f"{default_filename}.{format_type}",
+            f"{ext} Files (*.{format_type});;All Files (*)"
+        )
+        
+        if not filepath:
+            return
+        
+        try:
+            # Export results
+            success = self.exporter.export_mmseqs_results(
+                self.current_results_html,
+                self.current_query_info,
+                filepath,
+                format_type
+            )
+            
+            if success:
+                show_export_success(self, filepath)
+        
+        except ExportError as e:
+            show_export_error(self, e)
+    
+    def get_current_database_name(self):
+        """Get the current database name for display"""
+        if self.custom_mmseqs_radio.isChecked():
+            path = self.custom_mmseqs_path.text()
+            return os.path.basename(path) if path else "Custom MMseqs2 DB"
+        elif self.custom_ncbi_radio.isChecked():
+            if self.custom_blast_db_path:
+                return self.custom_blast_db_path
+            return "Custom NCBI DB"
+        else:
+            return self.db_combo.currentText().split(' (')[0] if hasattr(self, 'db_combo') else "Unknown"
     
     def scan_installed_databases(self):
         """Scan the blast_databases folder to find which databases are installed"""
@@ -866,6 +1249,16 @@ class MMseqsPage(QWidget):
         """Handle MMseqs2 results"""
         search_time = time.time() - self.search_start_time if self.search_start_time else 0
         
+        # Store results for export
+        self.current_results_html = results
+        self.current_query_info = {
+            'query_name': self.current_sequence_metadata.get('id', 'query'),
+            'query_length': str(len(self.input_text.toPlainText().strip())),
+            'database': self.get_current_database_name(),
+            'sensitivity': self.sensitivity_combo.currentText(),
+            'search_time': f"{search_time:.1f}s"
+        }
+        
         # Extract statistics and update summary panel
         total_hits, best_evalue, avg_identity = self.extract_stats_from_html(results)
         self.update_summary_panel(total_hits, best_evalue, avg_identity, search_time)
@@ -874,6 +1267,10 @@ class MMseqsPage(QWidget):
         self.output_text.setHtml(results)
         self.status_label.setText("Search complete!")
         self.process_button.setEnabled(True)
+        
+        # Enable export buttons
+        self.export_tsv_button.setEnabled(True)
+        self.export_csv_button.setEnabled(True)
     
     def on_mmseqs_error(self, error_msg):
         """Handle MMseqs2 errors"""
