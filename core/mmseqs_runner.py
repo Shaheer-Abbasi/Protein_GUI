@@ -6,11 +6,12 @@ import shutil
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from core.wsl_utils import run_wsl_command, windows_path_to_wsl, WSLError
+from utils.results_parser import MMSeqsResultsParser
 
 
 class MMseqsWorker(QThread):
     """Worker thread to run MMseqs2 search without freezing the GUI"""
-    finished = pyqtSignal(str)
+    finished = pyqtSignal(str, list)  # HTML, SearchHit objects
     error = pyqtSignal(str)
     
     def __init__(self, sequence, database_path, sensitivity="sensitive"):
@@ -79,10 +80,13 @@ class MMseqsWorker(QThread):
             output_file_windows = os.path.join(temp_dir_windows, 'results.m8')
             formatted_results = self.format_results(output_file_windows, result.stdout, result.stderr)
             
+            # Parse structured data from M8 file
+            structured_data = MMSeqsResultsParser.parse_m8(output_file_windows) if os.path.exists(output_file_windows) else []
+            
             # Cleanup
             shutil.rmtree(temp_dir_windows, ignore_errors=True)
             
-            self.finished.emit(formatted_results)
+            self.finished.emit(formatted_results, structured_data)
             
         except subprocess.TimeoutExpired:
             self.error.emit("MMseqs2 search timed out after 5 minutes.")

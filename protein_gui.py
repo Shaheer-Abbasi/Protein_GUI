@@ -12,6 +12,7 @@ class ProteinGUI(QMainWindow):
         super().__init__()
         self.setWindowTitle("Sen Lab - Protein Analysis Suite")
         self.setGeometry(100, 100, 900, 700)
+        self.setMinimumSize(800, 600)  # Enforce minimum size for usability
         
         # Set application style
         self.setStyleSheet("""
@@ -59,6 +60,10 @@ class ProteinGUI(QMainWindow):
         self.mmseqs_page.back_requested.connect(self.show_home_page)
         self.clustering_page.back_requested.connect(self.show_home_page)
         
+        # Connect clustering navigation signals
+        self.blast_page.navigate_to_clustering.connect(self.show_clustering_with_fasta)
+        self.mmseqs_page.navigate_to_clustering.connect(self.show_clustering_with_fasta)
+        
         # Add stacked widget to main layout
         main_layout.addWidget(self.stacked_widget)
         
@@ -82,6 +87,15 @@ class ProteinGUI(QMainWindow):
             self.stacked_widget.setCurrentWidget(self.clustering_page)
             self.setWindowTitle("Sen Lab - MMseqs2 Clustering")
         # Add more services here in the future
+    
+    def show_clustering_with_fasta(self, fasta_path: str, clustering_params: dict):
+        """Show clustering page with pre-loaded FASTA and parameters"""
+        # Load the FASTA into clustering page
+        self.clustering_page.load_fasta_from_search(fasta_path, clustering_params)
+        
+        # Navigate to clustering page
+        self.stacked_widget.setCurrentWidget(self.clustering_page)
+        self.setWindowTitle("Sen Lab - MMseqs2 Clustering")
 
 def main():
     try:

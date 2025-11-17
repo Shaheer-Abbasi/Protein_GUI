@@ -2,26 +2,34 @@ import os
 import time
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel, 
                              QComboBox, QHBoxLayout, QCheckBox, QLineEdit, QFileDialog, 
-                             QGroupBox, QRadioButton, QButtonGroup, QMessageBox, QFrame)
+                             QGroupBox, QRadioButton, QButtonGroup, QMessageBox, QFrame, QDialog)
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont
 
 from core.db_definitions import NCBI_DATABASES
 from core.blast_worker import BLASTWorker
+from core.config_manager import get_config
 from ui.dialogs.protein_search_dialog import ProteinSearchDialog
+from ui.dialogs.cluster_selection_dialog import ClusterSelectionDialog
+from ui.dialogs.clustering_config_dialog import ClusteringConfigDialog
+from core.sequence_fetcher_worker import SequenceFetcherWorker
+from core.temp_fasta_manager import get_temp_fasta_manager
 from utils.fasta_parser import FastaParser, FastaParseError, validate_amino_acid_sequence
 from utils.export_manager import ResultsExporter, ExportError, show_export_error, show_export_success
 
 class BLASTPage(QWidget):
     """BLAST analysis page widget"""
     back_requested = pyqtSignal()  # Signal to go back to home page
+    navigate_to_clustering = pyqtSignal(str, dict)  # fasta_path, clustering_params
     
     def __init__(self):
         super().__init__()
         self.blast_worker = None
         self.search_start_time = None
         self.current_results_html = ""
+        self.current_results_data = []  # Structured SearchHit objects
         self.current_query_info = {}
+        self.current_database_path = ""  # For sequence fetching
         self.fasta_parser = FastaParser()
         self.exporter = ResultsExporter()
         self.loaded_sequences = []  # For multi-FASTA support
@@ -447,6 +455,31 @@ class BLASTPage(QWidget):
         results_header_layout.addWidget(self.export_tsv_button)
         results_header_layout.addWidget(self.export_csv_button)
         
+        # Cluster button
+        self.cluster_button = QPushButton("📊 Cluster Results")
+        self.cluster_button.setEnabled(False)
+        cluster_button_style = """
+            QPushButton {
+                background-color: #9b59b6;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 5px 10px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #8e44ad;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """
+        self.cluster_button.setStyleSheet(cluster_button_style)
+        self.cluster_button.clicked.connect(self._on_cluster_results)
+        
+        results_header_layout.addWidget(self.cluster_button)
+        
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
         self.output_text.setAcceptRichText(True)  # Enable HTML rendering
@@ -773,12 +806,13 @@ class BLASTPage(QWidget):
         
         self.summary_panel.show()
     
-    def on_blast_finished(self, results):
+    def on_blast_finished(self, results_html, results_data):
         """Handle BLAST results"""
         search_time = time.time() - self.search_start_time if self.search_start_time else 0
         
-        # Store results for export
-        self.current_results_html = results
+        # Store results for export and clustering
+        self.current_results_html = results_html
+        self.current_results_data = results_data
         self.current_query_info = {
             'query_name': self.current_sequence_metadata.get('id', 'query'),
             'query_length': str(len(self.input_text.toPlainText().strip())),
@@ -787,17 +821,18 @@ class BLASTPage(QWidget):
         }
         
         # Extract statistics and update summary panel
-        total_hits, best_evalue, avg_identity = self.extract_stats_from_html(results)
+        total_hits, best_evalue, avg_identity = self.extract_stats_from_html(results_html)
         self.update_summary_panel(total_hits, best_evalue, avg_identity, search_time)
         
         # Display HTML results
-        self.output_text.setHtml(results)
+        self.output_text.setHtml(results_html)
         self.status_label.setText("Search complete!")
         self.process_button.setEnabled(True)
         
-        # Enable export buttons
+        # Enable export and cluster buttons
         self.export_tsv_button.setEnabled(True)
         self.export_csv_button.setEnabled(True)
+        self.cluster_button.setEnabled(len(results_data) >= 2)  # Need at least 2 for clustering
     
     def on_blast_error(self, error_msg):
         """Handle BLAST errors"""
@@ -805,3 +840,93 @@ class BLASTPage(QWidget):
         self.output_text.setPlainText(f"Error running BLAST:\n\n{error_msg}")
         self.status_label.setText("Error occurred")
         self.process_button.setEnabled(True)
+    
+    def _on_cluster_results(self):
+        """Handle cluster results button - orchestrate the clustering workflow"""
+        if not self.current_results_data or len(self.current_results_data) < 2:
+            QMessageBox.warning(
+                self,
+                "Insufficient Results",
+                "Need at least 2 results for clustering."
+            )
+            return
+        
+        # Step 1: Show selection dialog
+        selection_dialog = ClusterSelectionDialog(self.current_results_data, self)
+        if selection_dialog.exec_() != QDialog.Accepted:
+            return
+        
+        selected_hits = selection_dialog.get_selected_hits()
+        if len(selected_hits) < 2:
+            return
+        
+        # Step 2: Fetch sequences (with progress dialog)
+        self._fetch_and_cluster(selected_hits)
+    
+    def _fetch_and_cluster(self, selected_hits):
+        """Fetch sequences and proceed to clustering"""
+        from PyQt5.QtWidgets import QProgressDialog
+        
+        # Determine database path for sequence fetching
+        database_path = None
+        if not self.remote_radio.isChecked():
+            # Local database
+            if self.local_db_path.text().strip():
+                database_path = os.path.join(self.local_db_path.text().strip(), self.db_combo.currentText().split(' - ')[0])
+            else:
+                config = get_config()
+                db_name = self.db_combo.currentText().split(' - ')[0]
+                database_path = os.path.join(config.get_blast_db_dir(), db_name, db_name)
+        
+        # Create progress dialog
+        progress = QProgressDialog("Fetching sequences...", "Cancel", 0, len(selected_hits), self)
+        progress.setWindowTitle("Retrieving Sequences")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        
+        # Create and start worker
+        self.sequence_fetcher = SequenceFetcherWorker(selected_hits, database_path)
+        self.sequence_fetcher.progress.connect(
+            lambda current, total, status: progress.setValue(current)
+        )
+        self.sequence_fetcher.finished.connect(
+            lambda successful, failed: self._on_sequences_fetched(successful, failed, progress)
+        )
+        progress.canceled.connect(self.sequence_fetcher.stop)
+        
+        self.sequence_fetcher.start()
+    
+    def _on_sequences_fetched(self, successful_hits, failed_hits, progress_dialog):
+        """Handle completion of sequence fetching"""
+        progress_dialog.close()
+        
+        # Step 3: Show clustering config dialog
+        config_dialog = ClusteringConfigDialog(successful_hits, failed_hits, self)
+        if config_dialog.exec_() != QDialog.Accepted:
+            return
+        
+        clustering_params = config_dialog.get_parameters()
+        final_hits = config_dialog.get_successful_hits()
+        
+        if len(final_hits) < 2:
+            QMessageBox.warning(
+                self,
+                "Insufficient Sequences",
+                "Need at least 2 sequences for clustering."
+            )
+            return
+        
+        # Step 4: Create temp FASTA
+        try:
+            temp_manager = get_temp_fasta_manager()
+            fasta_path = temp_manager.create_temp_fasta(final_hits, prefix='blast_cluster_')
+            
+            # Step 5: Navigate to clustering page
+            self.navigate_to_clustering.emit(fasta_path, clustering_params)
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error Creating FASTA",
+                f"Failed to create temporary FASTA file:\n\n{str(e)}"
+            )

@@ -4,11 +4,12 @@ import os
 from PyQt5.QtCore import QThread, pyqtSignal
 from Bio.Blast import NCBIXML
 from core.config_manager import get_config
+from utils.results_parser import BLASTResultsParser
 
 
 class BLASTWorker(QThread):
     """Worker thread to run BLAST without freezing the GUI"""
-    finished = pyqtSignal(str)
+    finished = pyqtSignal(str, list)  # HTML, SearchHit objects
     error = pyqtSignal(str)
     
     def __init__(self, sequence, database, use_remote=True, local_db_path=""):
@@ -57,14 +58,15 @@ class BLASTWorker(QThread):
             # Execute BLAST
             subprocess.run(cmd, check=True, capture_output=True, text=True)
             
-            # Parse results with Biopython
-            parsed_results = self.parse_blast_xml(output_path)
+            # Parse results - get both HTML and structured data
+            html_results = self.parse_blast_xml(output_path)
+            structured_data = BLASTResultsParser.parse_xml(output_path)
             
             # Cleanup
             os.unlink(query_path)
             os.unlink(output_path)
             
-            self.finished.emit(parsed_results)
+            self.finished.emit(html_results, structured_data)
             
         except subprocess.CalledProcessError as e:
             self.error.emit(f"BLAST error: {e.stderr}")

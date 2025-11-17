@@ -4,14 +4,15 @@ import shutil
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
                              QFileDialog, QLineEdit, QComboBox, QSlider, QGroupBox, 
                              QTextEdit, QProgressBar, QMessageBox, QTabWidget, QTableWidget,
-                             QTableWidgetItem, QDoubleSpinBox, QCheckBox, QScrollArea)
-from PyQt5.QtCore import pyqtSignal, Qt, QTimer
+                             QTableWidgetItem, QDoubleSpinBox, QCheckBox, QScrollArea, QSplitter)
+from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QSettings
 from PyQt5.QtGui import QFont, QPixmap
 
 from core.clustering_worker import ClusteringWorker
 from core.clustering_manager import validate_fasta_file, export_clustering_tsv, get_cluster_table_data
 from core.clustering_visualizer import create_distribution_chart, create_text_summary, export_chart_html
 from core.wsl_utils import is_wsl_available, check_mmseqs_installation, warmup_wsl
+from ui.dialogs.chart_maximize_dialog import ChartMaximizeDialog
 
 
 class ClusteringPage(QWidget):
@@ -33,6 +34,10 @@ class ClusteringPage(QWidget):
         # Warm up WSL first, then check system requirements after a longer delay
         QTimer.singleShot(100, lambda: warmup_wsl())
         QTimer.singleShot(2000, self.check_system_requirements)  # Increased delay to 2 seconds
+        
+        # Track if FASTA is from search (temporary)
+        self.is_temp_fasta = False
+        self.loaded_from_search = False
 
     def init_ui(self):
         """Initialize the clustering page UI"""
@@ -261,6 +266,28 @@ class ClusteringPage(QWidget):
         # Control buttons
         control_layout = QHBoxLayout()
         
+        # Save FASTA button (for temp FASTA from searches)
+        self.save_fasta_button = QPushButton("💾 Save FASTA Permanently")
+        self.save_fasta_button.setStyleSheet("""
+            QPushButton {
+                background-color: #16a085;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 12px 30px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #138d75;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.save_fasta_button.clicked.connect(self._save_fasta_permanently)
+        self.save_fasta_button.setVisible(False)  # Hidden by default
+        
         self.run_button = QPushButton("Run Clustering")
         self.run_button.setStyleSheet("""
             QPushButton {
@@ -299,9 +326,10 @@ class ClusteringPage(QWidget):
         self.cancel_button.clicked.connect(self.cancel_clustering)
         self.cancel_button.setEnabled(False)
         
+        control_layout.addStretch()
+        control_layout.addWidget(self.save_fasta_button)
         control_layout.addWidget(self.run_button)
         control_layout.addWidget(self.cancel_button)
-        control_layout.addStretch()
         
         # Progress section
         self.progress_bar = QProgressBar()
@@ -331,9 +359,38 @@ class ClusteringPage(QWidget):
         chart_scroll.setWidget(self.chart_label)
         chart_scroll.setWidgetResizable(True)
         
+        # Maximize chart button
+        chart_header_layout = QHBoxLayout()
+        chart_title = QLabel("Cluster Distribution:")
+        
+        self.maximize_chart_button = QPushButton("⛶ Maximize Chart")
+        self.maximize_chart_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498db;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 5px 15px;
+                font-weight: bold;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #2980b9;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.maximize_chart_button.clicked.connect(self._maximize_chart)
+        self.maximize_chart_button.setEnabled(False)
+        
+        chart_header_layout.addWidget(chart_title)
+        chart_header_layout.addStretch()
+        chart_header_layout.addWidget(self.maximize_chart_button)
+        
         overview_layout.addWidget(QLabel("Summary Statistics:"))
         overview_layout.addWidget(self.summary_text)
-        overview_layout.addWidget(QLabel("Cluster Distribution:"))
+        overview_layout.addLayout(chart_header_layout)
         overview_layout.addWidget(chart_scroll)
         overview_tab.setLayout(overview_layout)
         
@@ -397,15 +454,45 @@ class ClusteringPage(QWidget):
         self.results_tabs.addTab(export_tab, "Export")
         
         # Add everything to main layout
+        # Create top container (parameters and controls)
+        top_container = QWidget()
+        top_layout = QVBoxLayout(top_container)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.addWidget(self.warning_label)
+        top_layout.addWidget(file_group)
+        top_layout.addWidget(params_group)
+        top_layout.addWidget(self.param_warning_label)
+        top_layout.addLayout(control_layout)
+        top_layout.addWidget(self.progress_bar)
+        top_layout.addWidget(self.status_label)
+        
+        # Create bottom container (results)
+        bottom_container = QWidget()
+        bottom_layout = QVBoxLayout(bottom_container)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.addWidget(self.results_tabs)
+        
+        # Create splitter
+        self.splitter = QSplitter(Qt.Vertical)
+        self.splitter.addWidget(top_container)
+        self.splitter.addWidget(bottom_container)
+        self.splitter.setStretchFactor(0, 0)  # Top doesn't stretch
+        self.splitter.setStretchFactor(1, 1)  # Bottom stretches
+        
+        # Restore splitter state from settings
+        settings = QSettings("SenLab", "ProteinGUI")
+        if settings.contains("clustering_splitter"):
+            self.splitter.restoreState(settings.value("clustering_splitter"))
+        else:
+            # Default sizes: give more space to results
+            self.splitter.setSizes([400, 300])
+        
+        # Save splitter state when moved
+        self.splitter.splitterMoved.connect(self._save_splitter_state)
+        
+        # Add to main layout
         layout.addLayout(header_layout)
-        layout.addWidget(self.warning_label)
-        layout.addWidget(file_group)
-        layout.addWidget(params_group)
-        layout.addWidget(self.param_warning_label)
-        layout.addLayout(control_layout)
-        layout.addWidget(self.progress_bar)
-        layout.addWidget(self.status_label)
-        layout.addWidget(self.results_tabs)
+        layout.addWidget(self.splitter)
         
         self.setLayout(layout)
     
@@ -598,8 +685,10 @@ class ClusteringPage(QWidget):
         if success:
             pixmap = QPixmap(self.chart_path)
             self.chart_label.setPixmap(pixmap.scaled(1000, 600, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            self.maximize_chart_button.setEnabled(True)  # Enable maximize button
         else:
             self.chart_label.setText(f"Chart generation failed: {result}")
+            self.maximize_chart_button.setEnabled(False)
         
         # Tab 2: Clusters table
         table_data = get_cluster_table_data(stats, max_rows=1000)
@@ -652,4 +741,118 @@ class ClusteringPage(QWidget):
                 QMessageBox.information(self, "Export Successful", f"Representatives exported to:\n{file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "Export Error", f"Failed to export:\n{str(e)}")
+    
+    def _save_splitter_state(self):
+        """Save splitter state to settings"""
+        settings = QSettings("SenLab", "ProteinGUI")
+        settings.setValue("clustering_splitter", self.splitter.saveState())
+    
+    def _maximize_chart(self):
+        """Open dialog with maximized chart view"""
+        if not self.chart_path or not os.path.exists(self.chart_path):
+            QMessageBox.warning(
+                self,
+                "No Chart Available",
+                "No chart is currently available to display."
+            )
+            return
+        
+        # Load the chart image
+        pixmap = QPixmap(self.chart_path)
+        
+        if pixmap.isNull():
+            QMessageBox.warning(
+                self,
+                "Chart Load Error",
+                "Failed to load the chart image."
+            )
+            return
+        
+        # Open maximize dialog
+        dialog = ChartMaximizeDialog(pixmap, "Cluster Distribution Chart", self)
+        dialog.exec_()
+    
+    def load_fasta_from_search(self, fasta_path: str, clustering_params: dict):
+        """
+        Load FASTA from BLAST/MMSeqs2 search results
+        Pre-fills parameters and shows save button
+        """
+        if not os.path.exists(fasta_path):
+            QMessageBox.warning(
+                self,
+                "File Not Found",
+                f"The temporary FASTA file was not found:\n{fasta_path}"
+            )
+            return
+        
+        # Set the FASTA path
+        self.fasta_path = fasta_path
+        self.file_path_input.setText(fasta_path)
+        self.is_temp_fasta = True
+        self.loaded_from_search = True
+        
+        # Pre-fill parameters from clustering config dialog
+        if 'min_seq_id' in clustering_params:
+            self.identity_spin.setValue(clustering_params['min_seq_id'])
+        
+        if 'coverage' in clustering_params:
+            self.coverage_spin.setValue(clustering_params['coverage'])
+        
+        if 'sensitivity' in clustering_params and clustering_params['sensitivity'] is not None:
+            self.sens_spin.setValue(clustering_params['sensitivity'])
+        
+        # Show save button and info message
+        self.save_fasta_button.setVisible(True)
+        
+        # Show info message
+        QMessageBox.information(
+            self,
+            "FASTA Loaded from Search",
+            "The selected sequences have been loaded for clustering.\n\n"
+            "• This is a temporary file that will be deleted when you close the application.\n"
+            "• Click '💾 Save FASTA Permanently' to save a copy.\n"
+            "• Clustering parameters have been pre-filled.\n\n"
+            "You can adjust parameters and click 'Run Clustering' when ready."
+        )
+    
+    def _save_fasta_permanently(self):
+        """Save the temporary FASTA file permanently"""
+        if not self.fasta_path or not os.path.exists(self.fasta_path):
+            QMessageBox.warning(
+                self,
+                "No FASTA Loaded",
+                "No temporary FASTA file is currently loaded."
+            )
+            return
+        
+        # Open save dialog
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save FASTA File",
+            "selected_sequences.fasta",
+            "FASTA Files (*.fasta *.fa);;All Files (*.*)"
+        )
+        
+        if file_path:
+            try:
+                shutil.copy2(self.fasta_path, file_path)
+                QMessageBox.information(
+                    self,
+                    "Save Successful",
+                    f"FASTA file saved to:\n{file_path}\n\n"
+                    "You can now use this file for other analyses."
+                )
+                
+                # Update the path to the permanent file
+                self.fasta_path = file_path
+                self.file_path_input.setText(file_path)
+                self.is_temp_fasta = False
+                self.save_fasta_button.setVisible(False)
+                
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Save Error",
+                    f"Failed to save FASTA file:\n\n{str(e)}"
+                )
 
