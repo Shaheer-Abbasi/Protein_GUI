@@ -30,9 +30,30 @@ A GUI application built with PyQt5 for running BLASTP searches on protein sequen
    pip install -r requirements.txt
    ```
 
-3. Install NCBI BLAST+ toolkit:
-   - Download from: https://blast.ncbi.nlm.nih.gov/Blast.cgi?PAGE_TYPE=BlastDocs&DOC_TYPE=Download
-   - Update the `blastp_path` in the code to match your installation
+3. Run the setup wizard to configure paths (recommended):
+   ```bash
+   python setup_wizard.py
+   ```
+   The setup wizard will:
+   - Detect BLAST+ installation automatically
+   - Detect MMSeqs2 installation (Windows or WSL)
+   - Find available databases
+   - Create a portable `config.json` file
+
+4. **Manual Installation** (if setup wizard doesn't find tools):
+   - **BLAST+**: Download from https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/
+   - **MMSeqs2**: Download from https://github.com/soedinglab/MMseqs2/releases
+   - Update paths in `config.json` after installation
+
+## Configuration for Multiple Computers
+
+The application is now **fully portable**! To use on a different computer:
+
+1. Copy the entire project folder to the new computer
+2. Run `python setup_wizard.py` to auto-detect tools on the new system
+3. The wizard will create a new `config.json` with machine-specific paths
+
+**Note**: All database paths are now relative to the project directory, so you can move the entire folder without issues.
 
 ## Database Setup
 

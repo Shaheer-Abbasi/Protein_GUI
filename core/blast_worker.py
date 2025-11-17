@@ -3,6 +3,7 @@ import tempfile
 import os
 from PyQt5.QtCore import QThread, pyqtSignal
 from Bio.Blast import NCBIXML
+from core.config_manager import get_config
 
 
 class BLASTWorker(QThread):
@@ -26,9 +27,9 @@ class BLASTWorker(QThread):
             
             output_path = tempfile.mktemp(suffix='.xml')
             
-            # Run BLASTP command with XML output for better parsing
-            blastp_path = r'C:\Users\18329\NCBI\ncbi-blast-2.17.0+-x64-win64.tar\ncbi-blast-2.17.0+-x64-win64\ncbi-blast-2.17.0+\bin\blastp.exe'
-            #blastp_path = r'C:\Users\abbas\Downloads\ncbi-blast-2.17.0+-x64-win64.tar\ncbi-blast-2.17.0+-x64-win64\ncbi-blast-2.17.0+\bin\blastp.exe'
+            # Get BLASTP path from config (portable across machines)
+            config = get_config()
+            blastp_path = config.get_blast_path()
             
             # Build command based on remote vs local database
             cmd = [
@@ -42,14 +43,14 @@ class BLASTWorker(QThread):
             if self.use_remote:
                 cmd.extend(['-remote', '-db', self.database])
             else:
-                # For local database, use the full path
+                # For local database, use the path relative to project root
                 if self.local_db_path:
                     # If user specified a custom path
                     local_db = os.path.join(self.local_db_path, self.database)
                 else:
-                    # Use default local database directory
-                    script_dir = os.path.dirname(os.path.abspath(__file__))
-                    local_db = os.path.join(script_dir, 'blast_databases', self.database)
+                    # Use default local database directory (relative to project root)
+                    blast_db_dir = config.get_blast_db_dir()
+                    local_db = os.path.join(blast_db_dir, self.database)
                 
                 cmd.extend(['-db', local_db])
             

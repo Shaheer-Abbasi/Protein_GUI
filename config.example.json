@@ -1,0 +1,8 @@
+{
+  "blast_path": "blastp",
+  "mmseqs_path": "mmseqs",
+  "mmseqs_available": false,
+  "blastdbcmd_available": false,
+  "databases_found": []
+}
+

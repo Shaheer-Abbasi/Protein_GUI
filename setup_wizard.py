@@ -31,6 +31,24 @@ def find_blast():
     
     return None
 
+def find_mmseqs_windows():
+    """Try to find MMSeqs2 installation on Windows"""
+    common_paths = [
+        r"C:\Program Files\MMSeqs2\mmseqs.exe",
+        r"C:\MMSeqs2\mmseqs.exe",
+        r"C:\mmseqs\bin\mmseqs.exe",
+    ]
+    
+    for path in common_paths:
+        if os.path.exists(path):
+            return path
+    
+    # Check if in PATH
+    if check_command(['mmseqs', '--help']):
+        return 'mmseqs'  # Available in PATH
+    
+    return None
+
 def check_wsl():
     """Check if WSL is available"""
     try:
@@ -101,6 +119,25 @@ def main():
             print(f"  [OK] Using: {manual_path}")
     print()
     
+    # Check MMSeqs2 on Windows (before checking WSL)
+    print("Checking MMSeqs2 on Windows...")
+    mmseqs_windows = find_mmseqs_windows()
+    if mmseqs_windows:
+        print(f"  [OK] MMSeqs2 found on Windows: {mmseqs_windows}")
+        config['mmseqs_path'] = mmseqs_windows
+        config['mmseqs_available'] = True
+    else:
+        print("  [!] MMSeqs2 not found on Windows")
+        print("      Download from: https://github.com/soedinglab/MMseqs2/releases")
+        manual_mmseqs = input("\n  Enter MMSeqs2 path (or press Enter to check WSL): ").strip()
+        if manual_mmseqs and os.path.exists(manual_mmseqs):
+            config['mmseqs_path'] = manual_mmseqs
+            config['mmseqs_available'] = True
+            print(f"  [OK] Using: {manual_mmseqs}")
+        else:
+            config['mmseqs_path'] = 'mmseqs'  # Default, will check WSL next
+    print()
+    
     # Check WSL
     print("Checking WSL installation...")
     if check_wsl():
@@ -108,18 +145,23 @@ def main():
         print("  Initializing WSL (first command may take a moment)...")
         warmup_wsl()
         
-        # Check MMseqs2
-        if check_wsl_command('mmseqs'):
-            print("  [OK] MMseqs2 installed in WSL")
-            config['mmseqs_available'] = True
+        # Check MMseqs2 in WSL (only if not already found on Windows)
+        if not config.get('mmseqs_available'):
+            if check_wsl_command('mmseqs'):
+                print("  [OK] MMseqs2 installed in WSL")
+                config['mmseqs_available'] = True
+                config['mmseqs_path'] = 'mmseqs'  # Will use WSL
+            else:
+                print("  [X] MMseqs2 not found in WSL")
+                print("      Install with:")
+                print("        wsl")
+                print("        wget https://mmseqs.com/latest/mmseqs-linux-avx2.tar.gz")
+                print("        tar xvfz mmseqs-linux-avx2.tar.gz")
+                print("        sudo cp mmseqs/bin/mmseqs /usr/local/bin/")
+                config['mmseqs_available'] = False
         else:
-            print("  [X] MMseqs2 not found in WSL")
-            print("      Install with:")
-            print("        wsl")
-            print("        wget https://mmseqs.com/latest/mmseqs-linux-avx2.tar.gz")
-            print("        tar xvfz mmseqs-linux-avx2.tar.gz")
-            print("        sudo cp mmseqs/bin/mmseqs /usr/local/bin/")
-            config['mmseqs_available'] = False
+            print("  [OK] Using MMseqs2 from Windows (WSL check skipped)")
+
         
         # Check blastdbcmd
         if check_wsl_command('blastdbcmd'):
