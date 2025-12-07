@@ -267,10 +267,10 @@ Edit `config.json` to set paths:
 - **Persistent State**: UI preferences saved with QSettings
 - **Error Handling**: Comprehensive validation and user feedback
 
-## Contributing
+5. Click "Run BLASTP Search"
 
 This is a research tool developed for the Sen Lab. For questions or issues, please contact the development team.
 
-## License
+## Future Enhancements
 
 Proprietary - Sen Lab
