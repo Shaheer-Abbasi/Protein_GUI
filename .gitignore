@@ -52,6 +52,7 @@ Thumbs.db
 *.log
 *.tmp
 temp/
+config.json
 
 # BLAST databases (large binary files)
 blast_databases/
@@ -70,3 +71,13 @@ blast_databases/
 *.btd
 *.bti
 *.sqlite3
+
+# MMseqs2 databases (converted databases and status)
+mmseqs_databases/
+nr.001/
+
+Protein-GUI-code.zip
+
+
+ALPHAFOLD_IMPLEMENTATION_SUMMARY.md
+E:\Projects\Protein-GUI\CONFIGURATION_GUIDE.md
