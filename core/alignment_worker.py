@@ -180,10 +180,9 @@ class AlignmentWorker(QThread):
         except Exception as e:
             raise AlignmentError(f"Error reading input file: {str(e)}")
         
-        # Write to WSL temp using bash
-        # Escape single quotes in content
-        escaped_content = content.replace("'", "'\\''")
-        
+        # Write to WSL temp using bash heredoc
+        # Note: Using quoted delimiter ('FASTA_EOF') prevents shell expansion,
+        # so content is written literally without needing escaping
         try:
             result = run_wsl_command(
                 f"cat > '{wsl_input_path}' << 'FASTA_EOF'\n{content}\nFASTA_EOF",
