@@ -100,19 +100,27 @@ class MSAViewerWidget(QWidget):
         
         layout.addWidget(fallback_widget)
     
+    def _get_project_root(self):
+        """Get the project root directory"""
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        return os.path.dirname(os.path.dirname(script_dir))
+    
     def _get_msa_js_path(self):
         """Get the path to the bundled MSAViewer JS file"""
-        # Try to find the bundled JS file
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        project_root = os.path.dirname(os.path.dirname(script_dir))
+        project_root = self._get_project_root()
         local_path = os.path.join(project_root, 'resources', 'msa', 'msa.min.js')
         
         if os.path.exists(local_path):
-            # Convert to file:// URL
-            return QUrl.fromLocalFile(local_path).toString()
+            # Return relative path - will be resolved with base URL
+            return "resources/msa/msa.min.js"
         else:
-            # Fall back to CDN (unpkg is more reliable than bio.sh)
-            return "https://unpkg.com/msa@1.0.3/dist/msa.min.gz.js"
+            # Fall back to CDN - use jsdelivr which serves uncompressed content
+            return "https://cdn.jsdelivr.net/npm/msa@1.0.3/dist/msa.js"
+    
+    def _get_base_url(self):
+        """Get the base URL for loading local resources"""
+        project_root = self._get_project_root()
+        return QUrl.fromLocalFile(project_root + '/')
     
     def _load_empty_viewer(self):
         """Load an empty MSAViewer"""
@@ -120,7 +128,8 @@ class MSAViewerWidget(QWidget):
             return
         
         html = self._generate_html("")
-        self.web_view.setHtml(html)
+        # Set base URL so local file:// resources can be loaded
+        self.web_view.setHtml(html, self._get_base_url())
     
     def _generate_html(self, fasta_b64):
         """
@@ -298,9 +307,9 @@ class MSAViewerWidget(QWidget):
             print(f"Error encoding FASTA: {e}")
             return False
         
-        # Generate and load HTML
+        # Generate and load HTML with base URL for local resources
         html = self._generate_html(fasta_b64)
-        self.web_view.setHtml(html)
+        self.web_view.setHtml(html, self._get_base_url())
         
         return True
     
