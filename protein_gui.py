@@ -3,8 +3,10 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QSt
 
 from ui.home_page import HomePage
 from ui.blast_page import BLASTPage
+from ui.blastn_page import BLASTNPage
 from ui.mmseqs_page import MMseqsPage
 from ui.clustering_page import ClusteringPage
+from ui.alignment_page import AlignmentPage
 
 
 class ProteinGUI(QMainWindow):
@@ -45,24 +47,33 @@ class ProteinGUI(QMainWindow):
         # Create and add pages
         self.home_page = HomePage()
         self.blast_page = BLASTPage()
+        self.blastn_page = BLASTNPage()
         self.mmseqs_page = MMseqsPage()
         self.clustering_page = ClusteringPage()
+        self.alignment_page = AlignmentPage()
         
         # Add pages to stack
         self.stacked_widget.addWidget(self.home_page)
         self.stacked_widget.addWidget(self.blast_page)
+        self.stacked_widget.addWidget(self.blastn_page)
         self.stacked_widget.addWidget(self.mmseqs_page)
         self.stacked_widget.addWidget(self.clustering_page)
+        self.stacked_widget.addWidget(self.alignment_page)
         
         # Connect signals
         self.home_page.service_selected.connect(self.show_service_page)
         self.blast_page.back_requested.connect(self.show_home_page)
+        self.blastn_page.back_requested.connect(self.show_home_page)
         self.mmseqs_page.back_requested.connect(self.show_home_page)
         self.clustering_page.back_requested.connect(self.show_home_page)
+        self.alignment_page.back_requested.connect(self.show_home_page)
         
         # Connect clustering navigation signals
         self.blast_page.navigate_to_clustering.connect(self.show_clustering_with_fasta)
         self.mmseqs_page.navigate_to_clustering.connect(self.show_clustering_with_fasta)
+        
+        # Connect alignment navigation signals
+        self.blast_page.navigate_to_alignment.connect(self.show_alignment_with_fasta)
         
         # Add stacked widget to main layout
         main_layout.addWidget(self.stacked_widget)
@@ -80,13 +91,18 @@ class ProteinGUI(QMainWindow):
         if service == "blast":
             self.stacked_widget.setCurrentWidget(self.blast_page)
             self.setWindowTitle("Sen Lab - BLASTP Search")
+        elif service == "blastn":
+            self.stacked_widget.setCurrentWidget(self.blastn_page)
+            self.setWindowTitle("Sen Lab - BLASTN Search")
         elif service == "mmseqs":
             self.stacked_widget.setCurrentWidget(self.mmseqs_page)
             self.setWindowTitle("Sen Lab - MMseqs2 Search")
         elif service == "clustering":
             self.stacked_widget.setCurrentWidget(self.clustering_page)
             self.setWindowTitle("Sen Lab - MMseqs2 Clustering")
-        # Add more services here in the future
+        elif service == "alignment":
+            self.stacked_widget.setCurrentWidget(self.alignment_page)
+            self.setWindowTitle("Sen Lab - Sequence Alignment")
     
     def show_clustering_with_fasta(self, fasta_path: str, clustering_params: dict):
         """Show clustering page with pre-loaded FASTA and parameters"""
@@ -96,6 +112,15 @@ class ProteinGUI(QMainWindow):
         # Navigate to clustering page
         self.stacked_widget.setCurrentWidget(self.clustering_page)
         self.setWindowTitle("Sen Lab - MMseqs2 Clustering")
+    
+    def show_alignment_with_fasta(self, fasta_path: str):
+        """Show alignment page with pre-loaded FASTA"""
+        # Load the FASTA into alignment page
+        self.alignment_page.load_sequences_from_search(fasta_path)
+        
+        # Navigate to alignment page
+        self.stacked_widget.setCurrentWidget(self.alignment_page)
+        self.setWindowTitle("Sen Lab - Sequence Alignment")
 
 def main():
     try:

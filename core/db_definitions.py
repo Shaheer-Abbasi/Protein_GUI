@@ -80,3 +80,40 @@ DATABASE_CATEGORIES = {
         'pdbnt', 'dbsts', 'landmark', 'gss', 'pdbaa'
     ]
 }
+
+# Protein-specific databases for BLASTP
+PROTEIN_DATABASES = {
+    'swissprot': 'UniProtKB/Swiss-Prot (curated protein sequences)',
+    'nr': 'Non-redundant protein sequences (all proteins)',
+    'pdb': 'Protein Data Bank proteins',
+    'refseq_protein': 'Reference proteins (RefSeq)',
+    'env_nr': 'Non-redundant protein sequences from environmental samples',
+    'tsa_nr': 'Non-redundant protein sequences from transcriptome shotgun assembly',
+    'pataa': 'Patent protein sequences',
+}
+
+# Nucleotide-specific databases for BLASTN
+NUCLEOTIDE_DATABASES = {
+    'nt': 'Nucleotide collection (comprehensive)',
+    'refseq_rna': 'Reference RNA sequences (RefSeq)',
+    'refseq_genomic': 'Reference genomic sequences (RefSeq)',
+    'est': 'Expressed sequence tags (all organisms)',
+    'est_human': 'Human expressed sequence tags',
+    'est_mouse': 'Mouse expressed sequence tags',
+    'est_others': 'ESTs from organisms other than human and mouse',
+    'tsa_nt': 'Transcriptome Shotgun Assembly nucleotides',
+    'env_nt': 'Environmental nucleotide sequences',
+    'wgs': 'Whole-genome shotgun sequences',
+    'gss': 'Genome survey sequences',
+    'htgs': 'High throughput genomic sequences',
+    'patnt': 'Patent nucleotide sequences',
+    'pdbnt': 'PDB nucleotide sequences',
+    'chromosome': 'RefSeq chromosome sequences',
+    '16S_ribosomal_RNA': '16S ribosomal RNA sequences (bacteria/archaea)',
+    'ITS_RefSeq_Fungi': 'Internal transcribed spacer region (fungi)',
+    '18S_fungal_sequences': '18S ribosomal RNA sequences (fungi)',
+    '28S_fungal_sequences': '28S ribosomal RNA sequences (fungi)',
+    'Betacoronavirus': 'Betacoronavirus sequences',
+    'human_genomic': 'Human genomic sequences',
+    'mouse_genomic': 'Mouse genomic sequences',
+}
