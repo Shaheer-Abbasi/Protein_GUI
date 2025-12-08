@@ -174,7 +174,43 @@ class HomePage(QWidget):
         clustering_container_layout.addWidget(clustering_button)
         clustering_container_layout.addWidget(clustering_desc)
         
-        services_layout.addWidget(clustering_container, 1, 0, 1, 2)  # Span 2 columns
+        services_layout.addWidget(clustering_container, 1, 0)
+        
+        # Alignment service button
+        alignment_button = QPushButton("Sequence Alignment")
+        alignment_button.setMinimumHeight(80)
+        alignment_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1abc9c;
+                color: white;
+                border: none;
+                border-radius: 8px;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 15px;
+            }
+            QPushButton:hover {
+                background-color: #16a085;
+            }
+            QPushButton:pressed {
+                background-color: #149174;
+            }
+        """)
+        alignment_button.clicked.connect(lambda: self.service_selected.emit("alignment"))
+        
+        # Alignment description
+        alignment_desc = QLabel("Multiple sequence alignment using Clustal Omega\nwith interactive ClustalX-style visualization")
+        alignment_desc.setWordWrap(True)
+        alignment_desc.setStyleSheet("color: #7f8c8d; margin-top: 10px; background: transparent;")
+        alignment_desc.setAlignment(Qt.AlignCenter)
+        
+        # Add Alignment service to grid
+        alignment_container = QWidget()
+        alignment_container_layout = QVBoxLayout(alignment_container)
+        alignment_container_layout.addWidget(alignment_button)
+        alignment_container_layout.addWidget(alignment_desc)
+        
+        services_layout.addWidget(alignment_container, 1, 1)
         
         # Add everything to main layout
         layout.addWidget(welcome_frame)
