@@ -12,12 +12,30 @@ class BLASTWorker(QThread):
     finished = pyqtSignal(str, list)  # HTML, SearchHit objects
     error = pyqtSignal(str)
     
-    def __init__(self, sequence, database, use_remote=True, local_db_path=""):
+    # Default advanced parameters
+    DEFAULT_PARAMS = {
+        'evalue': 10,
+        'max_target_seqs': 100,
+        'matrix': 'BLOSUM62',
+        'word_size': 6,
+        'gap_open': 11,
+        'gap_extend': 1,
+        'seg': 'yes',
+        'soft_masking': False,
+        'comp_based_stats': 2
+    }
+    
+    def __init__(self, sequence, database, use_remote=True, local_db_path="", advanced_params=None):
         super().__init__()
         self.sequence = sequence
         self.database = database
         self.use_remote = use_remote
         self.local_db_path = local_db_path
+        
+        # Merge default params with provided params
+        self.params = self.DEFAULT_PARAMS.copy()
+        if advanced_params:
+            self.params.update(advanced_params)
     
     def run(self):
         try:
@@ -37,9 +55,26 @@ class BLASTWorker(QThread):
                 blastp_path,
                 '-query', query_path,
                 '-outfmt', '5',  # XML format for Biopython parsing
-                '-max_target_seqs', '10',  # Limit to top 10 hits
-                '-out', output_path
+                '-out', output_path,
+                # Advanced parameters
+                '-evalue', str(self.params['evalue']),
+                '-max_target_seqs', str(self.params['max_target_seqs']),
+                '-matrix', self.params['matrix'],
+                '-word_size', str(self.params['word_size']),
+                '-gapopen', str(self.params['gap_open']),
+                '-gapextend', str(self.params['gap_extend']),
+                '-comp_based_stats', str(self.params['comp_based_stats'])
             ]
+            
+            # Add SEG filter option
+            if self.params['seg'] == 'yes':
+                cmd.extend(['-seg', 'yes'])
+            else:
+                cmd.extend(['-seg', 'no'])
+            
+            # Add soft masking if enabled
+            if self.params['soft_masking']:
+                cmd.extend(['-soft_masking', 'true'])
             
             if self.use_remote:
                 cmd.extend(['-remote', '-db', self.database])

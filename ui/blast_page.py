@@ -2,7 +2,8 @@ import os
 import time
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel, 
                              QComboBox, QHBoxLayout, QCheckBox, QLineEdit, QFileDialog, 
-                             QGroupBox, QRadioButton, QButtonGroup, QMessageBox, QFrame, QDialog)
+                             QGroupBox, QRadioButton, QButtonGroup, QMessageBox, QFrame, QDialog,
+                             QSpinBox, QDoubleSpinBox)
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont
 
@@ -329,6 +330,151 @@ class BLASTPage(QWidget):
         # Initially disable local database options
         self.on_database_source_changed()
         
+        # Advanced Settings Group
+        advanced_group = QGroupBox("Advanced Settings")
+        advanced_group_layout = QVBoxLayout()
+        
+        # Toggle checkbox for showing/hiding advanced options
+        self.show_advanced_checkbox = QCheckBox("Show Advanced Options")
+        self.show_advanced_checkbox.setStyleSheet("font-weight: bold;")
+        self.show_advanced_checkbox.stateChanged.connect(self._toggle_advanced_options)
+        
+        # Advanced options container
+        self.advanced_options_widget = QWidget()
+        advanced_options_layout = QVBoxLayout()
+        advanced_options_layout.setContentsMargins(0, 10, 0, 0)
+        
+        # Row 1: E-value and Max targets
+        row1_layout = QHBoxLayout()
+        
+        # E-value threshold
+        evalue_label = QLabel("E-value Threshold:")
+        evalue_label.setMinimumWidth(120)
+        self.evalue_input = QDoubleSpinBox()
+        self.evalue_input.setRange(1e-200, 1000)
+        self.evalue_input.setDecimals(0)
+        self.evalue_input.setValue(10)
+        self.evalue_input.setSpecialValueText("10")
+        self.evalue_input.setToolTip("Expect value threshold for reporting matches (default: 10)")
+        
+        # Max target sequences
+        max_targets_label = QLabel("Max Hits:")
+        max_targets_label.setMinimumWidth(80)
+        self.max_targets_input = QSpinBox()
+        self.max_targets_input.setRange(1, 5000)
+        self.max_targets_input.setValue(100)
+        self.max_targets_input.setToolTip("Maximum number of aligned sequences to keep (default: 100)")
+        
+        row1_layout.addWidget(evalue_label)
+        row1_layout.addWidget(self.evalue_input)
+        row1_layout.addSpacing(20)
+        row1_layout.addWidget(max_targets_label)
+        row1_layout.addWidget(self.max_targets_input)
+        row1_layout.addStretch()
+        
+        # Row 2: Matrix and Word Size
+        row2_layout = QHBoxLayout()
+        
+        # Scoring matrix
+        matrix_label = QLabel("Scoring Matrix:")
+        matrix_label.setMinimumWidth(120)
+        self.matrix_combo = QComboBox()
+        self.matrix_combo.addItems([
+            "BLOSUM62 (default)",
+            "BLOSUM45 (distant)",
+            "BLOSUM80 (close)",
+            "PAM30 (close)",
+            "PAM70 (distant)"
+        ])
+        self.matrix_combo.setToolTip("Scoring matrix for amino acid substitutions")
+        self.matrix_combo.currentIndexChanged.connect(self._update_gap_costs)
+        
+        # Word size
+        word_size_label = QLabel("Word Size:")
+        word_size_label.setMinimumWidth(80)
+        self.word_size_input = QSpinBox()
+        self.word_size_input.setRange(2, 7)
+        self.word_size_input.setValue(6)
+        self.word_size_input.setToolTip("Length of initial exact match (default: 6 for BLASTP)")
+        
+        row2_layout.addWidget(matrix_label)
+        row2_layout.addWidget(self.matrix_combo)
+        row2_layout.addSpacing(20)
+        row2_layout.addWidget(word_size_label)
+        row2_layout.addWidget(self.word_size_input)
+        row2_layout.addStretch()
+        
+        # Row 3: Gap costs
+        row3_layout = QHBoxLayout()
+        
+        gap_open_label = QLabel("Gap Open Cost:")
+        gap_open_label.setMinimumWidth(120)
+        self.gap_open_input = QSpinBox()
+        self.gap_open_input.setRange(1, 50)
+        self.gap_open_input.setValue(11)
+        self.gap_open_input.setToolTip("Cost to open a gap")
+        
+        gap_extend_label = QLabel("Gap Extend:")
+        gap_extend_label.setMinimumWidth(80)
+        self.gap_extend_input = QSpinBox()
+        self.gap_extend_input.setRange(1, 10)
+        self.gap_extend_input.setValue(1)
+        self.gap_extend_input.setToolTip("Cost to extend a gap")
+        
+        row3_layout.addWidget(gap_open_label)
+        row3_layout.addWidget(self.gap_open_input)
+        row3_layout.addSpacing(20)
+        row3_layout.addWidget(gap_extend_label)
+        row3_layout.addWidget(self.gap_extend_input)
+        row3_layout.addStretch()
+        
+        # Row 4: Filters
+        row4_layout = QHBoxLayout()
+        
+        self.low_complexity_checkbox = QCheckBox("Filter Low Complexity (SEG)")
+        self.low_complexity_checkbox.setChecked(True)
+        self.low_complexity_checkbox.setToolTip("Mask low-complexity regions in query sequence")
+        
+        self.soft_masking_checkbox = QCheckBox("Soft Masking")
+        self.soft_masking_checkbox.setChecked(False)
+        self.soft_masking_checkbox.setToolTip("Use soft masking for filtering instead of hard masking")
+        
+        row4_layout.addWidget(self.low_complexity_checkbox)
+        row4_layout.addSpacing(20)
+        row4_layout.addWidget(self.soft_masking_checkbox)
+        row4_layout.addStretch()
+        
+        # Row 5: Compositional adjustment
+        row5_layout = QHBoxLayout()
+        
+        comp_adj_label = QLabel("Composition Adjustment:")
+        comp_adj_label.setMinimumWidth(150)
+        self.comp_adj_combo = QComboBox()
+        self.comp_adj_combo.addItems([
+            "Conditional (default)",
+            "No adjustment",
+            "Unconditional"
+        ])
+        self.comp_adj_combo.setToolTip("Matrix composition-based statistics adjustment")
+        
+        row5_layout.addWidget(comp_adj_label)
+        row5_layout.addWidget(self.comp_adj_combo)
+        row5_layout.addStretch()
+        
+        # Add all rows to advanced options layout
+        advanced_options_layout.addLayout(row1_layout)
+        advanced_options_layout.addLayout(row2_layout)
+        advanced_options_layout.addLayout(row3_layout)
+        advanced_options_layout.addLayout(row4_layout)
+        advanced_options_layout.addLayout(row5_layout)
+        
+        self.advanced_options_widget.setLayout(advanced_options_layout)
+        self.advanced_options_widget.hide()  # Hidden by default
+        
+        advanced_group_layout.addWidget(self.show_advanced_checkbox)
+        advanced_group_layout.addWidget(self.advanced_options_widget)
+        advanced_group.setLayout(advanced_group_layout)
+        
         self.process_button = QPushButton("Run BLASTP Search")
         self.process_button.setStyleSheet("""
             QPushButton {
@@ -514,6 +660,7 @@ class BLASTPage(QWidget):
         layout.addLayout(header_layout)
         layout.addWidget(input_method_group)
         layout.addWidget(db_group)
+        layout.addWidget(advanced_group)
         layout.addWidget(self.process_button)
         layout.addWidget(self.status_label)
         layout.addWidget(self.summary_panel)  # Add summary panel
@@ -536,6 +683,56 @@ class BLASTPage(QWidget):
             self.paste_widget.setVisible(False)
             self.upload_widget.setVisible(False)
             self.search_widget.setVisible(True)
+    
+    def _toggle_advanced_options(self, state):
+        """Show/hide advanced options"""
+        self.advanced_options_widget.setVisible(state == Qt.Checked)
+    
+    def _update_gap_costs(self):
+        """Update gap costs based on selected matrix"""
+        # Default gap costs for each matrix
+        gap_costs = {
+            0: (11, 1),   # BLOSUM62
+            1: (15, 2),   # BLOSUM45
+            2: (10, 1),   # BLOSUM80
+            3: (9, 1),    # PAM30
+            4: (10, 1),   # PAM70
+        }
+        matrix_idx = self.matrix_combo.currentIndex()
+        if matrix_idx in gap_costs:
+            open_cost, extend_cost = gap_costs[matrix_idx]
+            self.gap_open_input.setValue(open_cost)
+            self.gap_extend_input.setValue(extend_cost)
+    
+    def _get_advanced_params(self):
+        """Get advanced parameters as a dictionary"""
+        # Map matrix combo index to actual matrix name
+        matrix_map = {
+            0: "BLOSUM62",
+            1: "BLOSUM45", 
+            2: "BLOSUM80",
+            3: "PAM30",
+            4: "PAM70"
+        }
+        
+        # Map composition adjustment
+        comp_adj_map = {
+            0: 2,  # Conditional composition score matrix adjustment
+            1: 0,  # No adjustment
+            2: 1   # Unconditional
+        }
+        
+        return {
+            'evalue': self.evalue_input.value(),
+            'max_target_seqs': self.max_targets_input.value(),
+            'matrix': matrix_map.get(self.matrix_combo.currentIndex(), "BLOSUM62"),
+            'word_size': self.word_size_input.value(),
+            'gap_open': self.gap_open_input.value(),
+            'gap_extend': self.gap_extend_input.value(),
+            'seg': 'yes' if self.low_complexity_checkbox.isChecked() else 'no',
+            'soft_masking': self.soft_masking_checkbox.isChecked(),
+            'comp_based_stats': comp_adj_map.get(self.comp_adj_combo.currentIndex(), 2)
+        }
     
     def _update_sequence_counter(self):
         """Update the amino acid counter for pasted sequence"""
@@ -773,9 +970,15 @@ class BLASTPage(QWidget):
                 return
             local_db_path = ""  # Will use default
         
+        # Get advanced parameters
+        advanced_params = self._get_advanced_params()
+        
         # Start BLAST in background thread
         self.search_start_time = time.time()
-        self.blast_worker = BLASTWorker(sequence, database, use_remote, local_db_path)
+        self.blast_worker = BLASTWorker(
+            sequence, database, use_remote, local_db_path,
+            advanced_params=advanced_params
+        )
         self.blast_worker.finished.connect(self.on_blast_finished)
         self.blast_worker.error.connect(self.on_blast_error)
         self.blast_worker.start()
