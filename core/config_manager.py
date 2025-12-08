@@ -58,8 +58,19 @@ class ConfigManager:
             return False
     
     def get_blast_path(self):
-        """Get BLAST executable path"""
+        """Get BLASTP executable path"""
         return self.config.get('blast_path', 'blastp')
+    
+    def get_blastn_path(self):
+        """Get BLASTN executable path"""
+        # If blast_path is configured, derive blastn from the same directory
+        blastp_path = self.config.get('blast_path', 'blastp')
+        if os.path.dirname(blastp_path):
+            # blastp has a directory, use the same directory for blastn
+            return os.path.join(os.path.dirname(blastp_path), 'blastn')
+        else:
+            # blastp is just the command name, assume blastn is also in PATH
+            return 'blastn'
     
     def get_mmseqs_path(self):
         """Get MMSeqs2 executable path"""

@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout, QWidget, QSt
 
 from ui.home_page import HomePage
 from ui.blast_page import BLASTPage
+from ui.blastn_page import BLASTNPage
 from ui.mmseqs_page import MMseqsPage
 from ui.clustering_page import ClusteringPage
 from ui.alignment_page import AlignmentPage
@@ -46,6 +47,7 @@ class ProteinGUI(QMainWindow):
         # Create and add pages
         self.home_page = HomePage()
         self.blast_page = BLASTPage()
+        self.blastn_page = BLASTNPage()
         self.mmseqs_page = MMseqsPage()
         self.clustering_page = ClusteringPage()
         self.alignment_page = AlignmentPage()
@@ -53,6 +55,7 @@ class ProteinGUI(QMainWindow):
         # Add pages to stack
         self.stacked_widget.addWidget(self.home_page)
         self.stacked_widget.addWidget(self.blast_page)
+        self.stacked_widget.addWidget(self.blastn_page)
         self.stacked_widget.addWidget(self.mmseqs_page)
         self.stacked_widget.addWidget(self.clustering_page)
         self.stacked_widget.addWidget(self.alignment_page)
@@ -60,6 +63,7 @@ class ProteinGUI(QMainWindow):
         # Connect signals
         self.home_page.service_selected.connect(self.show_service_page)
         self.blast_page.back_requested.connect(self.show_home_page)
+        self.blastn_page.back_requested.connect(self.show_home_page)
         self.mmseqs_page.back_requested.connect(self.show_home_page)
         self.clustering_page.back_requested.connect(self.show_home_page)
         self.alignment_page.back_requested.connect(self.show_home_page)
@@ -87,6 +91,9 @@ class ProteinGUI(QMainWindow):
         if service == "blast":
             self.stacked_widget.setCurrentWidget(self.blast_page)
             self.setWindowTitle("Sen Lab - BLASTP Search")
+        elif service == "blastn":
+            self.stacked_widget.setCurrentWidget(self.blastn_page)
+            self.setWindowTitle("Sen Lab - BLASTN Search")
         elif service == "mmseqs":
             self.stacked_widget.setCurrentWidget(self.mmseqs_page)
             self.setWindowTitle("Sen Lab - MMseqs2 Search")
