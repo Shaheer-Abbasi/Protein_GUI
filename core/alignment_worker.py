@@ -94,6 +94,8 @@ class AlignmentWorker(QThread):
     
     def run(self):
         """Run the alignment"""
+        output_path = None
+        
         try:
             self.progress.emit(0, "Preparing alignment...")
             
@@ -136,22 +138,22 @@ class AlignmentWorker(QThread):
             # Read the output
             aligned_content = self._read_wsl_output(wsl_output_path)
             
-            # Save to a Windows temp file
+            # Save to a Windows temp file (not tracked for cleanup - caller owns it)
             output_path = self._save_output(aligned_content)
             
             self.progress.emit(100, "Alignment complete!")
             
-            # Clean up
-            self._cleanup_temp_files()
-            
             self.finished.emit(aligned_content, output_path)
             
         except AlignmentError as e:
-            self._cleanup_temp_files()
+            self._cleanup_windows_output(output_path)
             self.error.emit(str(e))
         except Exception as e:
-            self._cleanup_temp_files()
+            self._cleanup_windows_output(output_path)
             self.error.emit(f"Unexpected error: {str(e)}")
+        finally:
+            # Always clean up WSL temp files
+            self._cleanup_wsl_temp_files()
     
     def _count_sequences(self):
         """Count sequences in the input FASTA file"""
@@ -282,22 +284,31 @@ class AlignmentWorker(QThread):
         except Exception as e:
             raise AlignmentError(f"Error saving output: {str(e)}")
         
-        self._temp_files.append(('windows', output_path))
+        # Note: Don't add to _temp_files - caller owns this file
         return output_path
     
-    def _cleanup_temp_files(self):
-        """Clean up temporary files"""
+    def _cleanup_wsl_temp_files(self):
+        """Clean up WSL temporary files only"""
         for file_type, path in self._temp_files:
-            try:
-                if file_type == 'wsl':
+            if file_type == 'wsl':
+                try:
                     run_wsl_command(f"rm -f '{path}'", timeout=10)
-                else:
-                    if os.path.exists(path):
-                        os.remove(path)
-            except:
-                pass  # Best effort cleanup
+                except:
+                    pass  # Best effort cleanup
         
         self._temp_files = []
+    
+    def _cleanup_windows_output(self, output_path):
+        """Clean up Windows output file on error"""
+        if output_path and os.path.exists(output_path):
+            try:
+                os.remove(output_path)
+            except:
+                pass  # Best effort cleanup
+    
+    def _cleanup_temp_files(self):
+        """Clean up all temporary files (legacy method for compatibility)"""
+        self._cleanup_wsl_temp_files()
 
 
 class SequenceAlignmentPrep:

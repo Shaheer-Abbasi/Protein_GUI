@@ -67,6 +67,8 @@ class HomePage(QWidget):
             }
         """)
         services_layout = QGridLayout(services_frame)
+        services_layout.setSpacing(20)  # Add spacing between grid cells
+        services_layout.setContentsMargins(15, 15, 15, 15)  # Add margins inside the frame
         
         # BLAST service button
         blast_button = QPushButton("BLASTP Search")
@@ -99,8 +101,11 @@ class HomePage(QWidget):
         # Add BLAST service to grid
         blast_container = QWidget()
         blast_container_layout = QVBoxLayout(blast_container)
+        blast_container_layout.setContentsMargins(5, 5, 5, 5)
+        blast_container_layout.setSpacing(8)
         blast_container_layout.addWidget(blast_button)
         blast_container_layout.addWidget(blast_desc)
+        blast_container_layout.addStretch()
         
         services_layout.addWidget(blast_container, 0, 0)
         
@@ -135,8 +140,11 @@ class HomePage(QWidget):
         # Add MMseqs2 service to grid
         mmseqs_container = QWidget()
         mmseqs_container_layout = QVBoxLayout(mmseqs_container)
+        mmseqs_container_layout.setContentsMargins(5, 5, 5, 5)
+        mmseqs_container_layout.setSpacing(8)
         mmseqs_container_layout.addWidget(mmseqs_button)
         mmseqs_container_layout.addWidget(mmseqs_desc)
+        mmseqs_container_layout.addStretch()
         
         services_layout.addWidget(mmseqs_container, 0, 1)
         
@@ -171,8 +179,11 @@ class HomePage(QWidget):
         # Add Clustering service to grid
         clustering_container = QWidget()
         clustering_container_layout = QVBoxLayout(clustering_container)
+        clustering_container_layout.setContentsMargins(5, 5, 5, 5)
+        clustering_container_layout.setSpacing(8)
         clustering_container_layout.addWidget(clustering_button)
         clustering_container_layout.addWidget(clustering_desc)
+        clustering_container_layout.addStretch()
         
         services_layout.addWidget(clustering_container, 1, 0)
         
@@ -207,8 +218,11 @@ class HomePage(QWidget):
         # Add Alignment service to grid
         alignment_container = QWidget()
         alignment_container_layout = QVBoxLayout(alignment_container)
+        alignment_container_layout.setContentsMargins(5, 5, 5, 5)
+        alignment_container_layout.setSpacing(8)
         alignment_container_layout.addWidget(alignment_button)
         alignment_container_layout.addWidget(alignment_desc)
+        alignment_container_layout.addStretch()
         
         services_layout.addWidget(alignment_container, 1, 1)
         

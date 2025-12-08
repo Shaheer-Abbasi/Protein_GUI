@@ -68,6 +68,9 @@ class ProteinGUI(QMainWindow):
         self.blast_page.navigate_to_clustering.connect(self.show_clustering_with_fasta)
         self.mmseqs_page.navigate_to_clustering.connect(self.show_clustering_with_fasta)
         
+        # Connect alignment navigation signals
+        self.blast_page.navigate_to_alignment.connect(self.show_alignment_with_fasta)
+        
         # Add stacked widget to main layout
         main_layout.addWidget(self.stacked_widget)
         
@@ -102,6 +105,15 @@ class ProteinGUI(QMainWindow):
         # Navigate to clustering page
         self.stacked_widget.setCurrentWidget(self.clustering_page)
         self.setWindowTitle("Sen Lab - MMseqs2 Clustering")
+    
+    def show_alignment_with_fasta(self, fasta_path: str):
+        """Show alignment page with pre-loaded FASTA"""
+        # Load the FASTA into alignment page
+        self.alignment_page.load_sequences_from_search(fasta_path)
+        
+        # Navigate to alignment page
+        self.stacked_widget.setCurrentWidget(self.alignment_page)
+        self.setWindowTitle("Sen Lab - Sequence Alignment")
 
 def main():
     try:

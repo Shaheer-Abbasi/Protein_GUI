@@ -21,6 +21,7 @@ class BLASTPage(QWidget):
     """BLAST analysis page widget"""
     back_requested = pyqtSignal()  # Signal to go back to home page
     navigate_to_clustering = pyqtSignal(str, dict)  # fasta_path, clustering_params
+    navigate_to_alignment = pyqtSignal(str)  # fasta_path for alignment
     
     def __init__(self):
         super().__init__()
@@ -480,6 +481,31 @@ class BLASTPage(QWidget):
         
         results_header_layout.addWidget(self.cluster_button)
         
+        # Align button
+        self.align_button = QPushButton("🧬 Align Results")
+        self.align_button.setEnabled(False)
+        align_button_style = """
+            QPushButton {
+                background-color: #1abc9c;
+                color: white;
+                border: none;
+                border-radius: 3px;
+                padding: 5px 10px;
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #16a085;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """
+        self.align_button.setStyleSheet(align_button_style)
+        self.align_button.clicked.connect(self._on_align_results)
+        
+        results_header_layout.addWidget(self.align_button)
+        
         self.output_text = QTextEdit()
         self.output_text.setReadOnly(True)
         self.output_text.setAcceptRichText(True)  # Enable HTML rendering
@@ -833,6 +859,7 @@ class BLASTPage(QWidget):
         self.export_tsv_button.setEnabled(True)
         self.export_csv_button.setEnabled(True)
         self.cluster_button.setEnabled(len(results_data) >= 2)  # Need at least 2 for clustering
+        self.align_button.setEnabled(len(results_data) >= 2)  # Need at least 2 for alignment
     
     def on_blast_error(self, error_msg):
         """Handle BLAST errors"""
@@ -923,6 +950,111 @@ class BLASTPage(QWidget):
             
             # Step 5: Navigate to clustering page
             self.navigate_to_clustering.emit(fasta_path, clustering_params)
+            
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Error Creating FASTA",
+                f"Failed to create temporary FASTA file:\n\n{str(e)}"
+            )
+    
+    def _on_align_results(self):
+        """Handle align results button - orchestrate the alignment workflow"""
+        if not self.current_results_data or len(self.current_results_data) < 2:
+            QMessageBox.warning(
+                self,
+                "Insufficient Results",
+                "Need at least 2 results for alignment."
+            )
+            return
+        
+        # Step 1: Show selection dialog (reuse clustering selection dialog)
+        selection_dialog = ClusterSelectionDialog(self.current_results_data, self)
+        selection_dialog.setWindowTitle("Select Sequences for Alignment")
+        if selection_dialog.exec_() != QDialog.Accepted:
+            return
+        
+        selected_hits = selection_dialog.get_selected_hits()
+        if len(selected_hits) < 2:
+            QMessageBox.warning(
+                self,
+                "Insufficient Selection",
+                "Please select at least 2 sequences for alignment."
+            )
+            return
+        
+        # Step 2: Fetch sequences (with progress dialog)
+        self._fetch_and_align(selected_hits)
+    
+    def _fetch_and_align(self, selected_hits):
+        """Fetch sequences and proceed to alignment"""
+        from PyQt5.QtWidgets import QProgressDialog
+        
+        # Determine database path for sequence fetching
+        database_path = None
+        if not self.remote_radio.isChecked():
+            # Local database
+            if self.local_db_path.text().strip():
+                database_path = os.path.join(self.local_db_path.text().strip(), self.db_combo.currentText().split(' - ')[0])
+            else:
+                config = get_config()
+                db_name = self.db_combo.currentText().split(' - ')[0]
+                database_path = os.path.join(config.get_blast_db_dir(), db_name, db_name)
+        
+        # Create progress dialog
+        progress = QProgressDialog("Fetching sequences for alignment...", "Cancel", 0, len(selected_hits), self)
+        progress.setWindowTitle("Retrieving Sequences")
+        progress.setWindowModality(Qt.WindowModal)
+        progress.setMinimumDuration(0)
+        
+        # Create and start worker
+        self.align_sequence_fetcher = SequenceFetcherWorker(selected_hits, database_path)
+        self.align_sequence_fetcher.progress.connect(
+            lambda current, total, status: progress.setValue(current)
+        )
+        self.align_sequence_fetcher.finished.connect(
+            lambda successful, failed: self._on_align_sequences_fetched(successful, failed, progress)
+        )
+        progress.canceled.connect(self.align_sequence_fetcher.stop)
+        
+        self.align_sequence_fetcher.start()
+    
+    def _on_align_sequences_fetched(self, successful_hits, failed_hits, progress_dialog):
+        """Handle completion of sequence fetching for alignment"""
+        progress_dialog.close()
+        
+        # Check if we have enough sequences
+        if len(successful_hits) < 2:
+            failed_msg = ""
+            if failed_hits:
+                failed_msg = f"\n\nFailed to fetch {len(failed_hits)} sequences."
+            QMessageBox.warning(
+                self,
+                "Insufficient Sequences",
+                f"Need at least 2 sequences with successfully retrieved sequences for alignment.{failed_msg}"
+            )
+            return
+        
+        # Show summary if some failed
+        if failed_hits:
+            reply = QMessageBox.question(
+                self,
+                "Some Sequences Failed",
+                f"Successfully fetched {len(successful_hits)} sequences.\n"
+                f"Failed to fetch {len(failed_hits)} sequences.\n\n"
+                "Do you want to proceed with the successful sequences?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply != QMessageBox.Yes:
+                return
+        
+        # Create temp FASTA
+        try:
+            temp_manager = get_temp_fasta_manager()
+            fasta_path = temp_manager.create_temp_fasta(successful_hits, prefix='blast_align_')
+            
+            # Navigate to alignment page
+            self.navigate_to_alignment.emit(fasta_path)
             
         except Exception as e:
             QMessageBox.critical(
