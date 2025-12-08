@@ -13,6 +13,7 @@ from core.blastn_worker import BLASTNWorker
 from core.config_manager import get_config
 from utils.fasta_parser import FastaParser, FastaParseError
 from utils.export_manager import ResultsExporter, ExportError, show_export_error, show_export_success
+from ui.dialogs.nucleotide_search_dialog import NucleotideSearchDialog
 
 
 def validate_nucleotide_sequence(sequence):
@@ -87,11 +88,13 @@ class BLASTNPage(QWidget):
         
         self.paste_radio = QRadioButton("Paste Sequence")
         self.upload_radio = QRadioButton("Upload FASTA File")
+        self.search_radio = QRadioButton("Search NCBI Database")
         
         self.paste_radio.setChecked(True)
         
         self.input_method_group.addButton(self.paste_radio, 1)
         self.input_method_group.addButton(self.upload_radio, 2)
+        self.input_method_group.addButton(self.search_radio, 3)
         
         radio_style = """
             QRadioButton {
@@ -106,12 +109,15 @@ class BLASTNPage(QWidget):
         """
         self.paste_radio.setStyleSheet(radio_style)
         self.upload_radio.setStyleSheet(radio_style)
+        self.search_radio.setStyleSheet(radio_style)
         
         self.paste_radio.toggled.connect(self._on_input_method_changed)
         self.upload_radio.toggled.connect(self._on_input_method_changed)
+        self.search_radio.toggled.connect(self._on_input_method_changed)
         
         method_buttons_layout.addWidget(self.paste_radio)
         method_buttons_layout.addWidget(self.upload_radio)
+        method_buttons_layout.addWidget(self.search_radio)
         method_buttons_layout.addStretch()
         
         input_method_layout.addLayout(method_buttons_layout)
@@ -180,9 +186,43 @@ class BLASTNPage(QWidget):
         self.upload_widget.setLayout(upload_layout)
         self.upload_widget.setVisible(False)
         
+        # --- Search Database Section ---
+        self.search_widget = QWidget()
+        search_layout = QVBoxLayout()
+        search_layout.setContentsMargins(0, 0, 0, 0)
+        
+        search_button_layout = QHBoxLayout()
+        self.search_db_button = QPushButton("🔍 Search NCBI GenBank")
+        self.search_db_button.clicked.connect(self._open_nucleotide_search)
+        self.search_db_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1e8449;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px 20px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #196f3d;
+            }
+        """)
+        
+        self.search_info_label = QLabel("Search GenBank by gene name, accession, or keywords")
+        self.search_info_label.setStyleSheet("color: #7f8c8d; font-style: italic;")
+        
+        search_button_layout.addWidget(self.search_db_button)
+        search_button_layout.addWidget(self.search_info_label)
+        search_button_layout.addStretch()
+        
+        search_layout.addLayout(search_button_layout)
+        self.search_widget.setLayout(search_layout)
+        self.search_widget.setVisible(False)
+        
         # Add all input widgets to container
         self.input_container_layout.addWidget(self.paste_widget)
         self.input_container_layout.addWidget(self.upload_widget)
+        self.input_container_layout.addWidget(self.search_widget)
         self.input_container.setLayout(self.input_container_layout)
         
         input_method_layout.addWidget(self.input_container)
@@ -435,6 +475,9 @@ class BLASTNPage(QWidget):
         advanced_group_layout.addWidget(self.advanced_options_widget)
         advanced_group.setLayout(advanced_group_layout)
         
+        # Button layout
+        button_layout = QHBoxLayout()
+        
         # Run button
         self.process_button = QPushButton("Run BLASTN Search")
         self.process_button.setStyleSheet("""
@@ -455,6 +498,33 @@ class BLASTNPage(QWidget):
             }
         """)
         self.process_button.clicked.connect(self.run_blast)
+        
+        # Cancel button
+        self.cancel_button = QPushButton("Cancel Search")
+        self.cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #e74c3c;
+                color: white;
+                border: none;
+                border-radius: 5px;
+                padding: 10px;
+                font-size: 14px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #c0392b;
+            }
+            QPushButton:disabled {
+                background-color: #bdc3c7;
+            }
+        """)
+        self.cancel_button.clicked.connect(self._cancel_search)
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.hide()
+        
+        button_layout.addWidget(self.process_button)
+        button_layout.addWidget(self.cancel_button)
+        button_layout.addStretch()
         
         self.status_label = QLabel("Ready")
         self.status_label.setStyleSheet("color: #7f8c8d; font-weight: bold;")
@@ -570,7 +640,7 @@ class BLASTNPage(QWidget):
         layout.addWidget(input_method_group)
         layout.addWidget(db_group)
         layout.addWidget(advanced_group)
-        layout.addWidget(self.process_button)
+        layout.addLayout(button_layout)
         layout.addWidget(self.status_label)
         layout.addWidget(self.summary_panel)
         layout.addLayout(results_header_layout)
@@ -583,9 +653,15 @@ class BLASTNPage(QWidget):
         if self.paste_radio.isChecked():
             self.paste_widget.setVisible(True)
             self.upload_widget.setVisible(False)
+            self.search_widget.setVisible(False)
         elif self.upload_radio.isChecked():
             self.paste_widget.setVisible(False)
             self.upload_widget.setVisible(True)
+            self.search_widget.setVisible(False)
+        elif self.search_radio.isChecked():
+            self.paste_widget.setVisible(False)
+            self.upload_widget.setVisible(False)
+            self.search_widget.setVisible(True)
     
     def _toggle_advanced_options(self, state):
         """Show/hide advanced options"""
@@ -714,6 +790,47 @@ class BLASTNPage(QWidget):
                 'id': selected_seq.id
             }
     
+    def _open_nucleotide_search(self):
+        """Open nucleotide search dialog"""
+        dialog = NucleotideSearchDialog(self)
+        dialog.sequence_selected.connect(self._on_nucleotide_selected)
+        dialog.exec_()
+    
+    def _on_nucleotide_selected(self, sequence, metadata):
+        """Handle nucleotide selection from search dialog"""
+        accession = metadata.get('accession', 'Unknown')
+        title = metadata.get('title', 'Unknown')
+        organism = metadata.get('organism', 'Unknown')
+        length = metadata.get('length', 0)
+        
+        # Truncate title for display
+        display_title = title[:50] + "..." if len(title) > 50 else title
+        
+        reply = QMessageBox.question(
+            self,
+            "Load Sequence",
+            f"Load nucleotide sequence?\n\n"
+            f"Accession: {accession}\n"
+            f"Title: {display_title}\n"
+            f"Organism: {organism}\n"
+            f"Length: {length:,} nucleotides",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.input_text.setPlainText(sequence)
+            self.current_sequence_metadata = {
+                'source': 'genbank',
+                'accession': accession,
+                'title': title,
+                'organism': organism,
+                'id': accession
+            }
+            self.search_info_label.setText(
+                f"✓ Loaded: {accession} ({organism})"
+            )
+            self.search_info_label.setStyleSheet("color: #1e8449; font-weight: bold;")
+    
     def _export_results(self, format_type):
         """Export results to TSV or CSV"""
         if not self.current_results_html:
@@ -802,10 +919,17 @@ class BLASTNPage(QWidget):
             )
             return
         
-        # Disable button during search
+        # Disable run button, show cancel button
         self.process_button.setEnabled(False)
-        self.status_label.setText("Running BLASTN search... This may take a minute.")
-        self.output_text.setText("Searching NCBI database...\n\nPlease wait, this can take 30-60 seconds for remote searches.")
+        self.cancel_button.setEnabled(True)
+        self.cancel_button.show()
+        self.status_label.setText("Running BLASTN search... This may take several minutes.")
+        self.output_text.setText(
+            "Searching NCBI database...\n\n"
+            "Remote searches can take 1-5 minutes depending on database size.\n"
+            "The 'nt' database is very large - consider using 'refseq_rna' for faster results.\n\n"
+            "Click 'Cancel Search' to stop the search."
+        )
         
         # Get selected database and options
         database_text = self.db_combo.currentText()
@@ -824,7 +948,19 @@ class BLASTNPage(QWidget):
         )
         self.blast_worker.finished.connect(self.on_blast_finished)
         self.blast_worker.error.connect(self.on_blast_error)
+        self.blast_worker.progress.connect(self._on_blast_progress)
         self.blast_worker.start()
+    
+    def _cancel_search(self):
+        """Cancel the running BLAST search"""
+        if self.blast_worker and self.blast_worker.isRunning():
+            self.blast_worker.cancel()
+            self.status_label.setText("Cancelling search...")
+            self.cancel_button.setEnabled(False)
+    
+    def _on_blast_progress(self, message):
+        """Handle progress updates from BLAST worker"""
+        self.status_label.setText(message)
     
     def extract_stats_from_html(self, html_results):
         """Extract statistics from HTML results"""
@@ -894,12 +1030,16 @@ class BLASTNPage(QWidget):
         self.output_text.setHtml(results_html)
         self.status_label.setText("Search complete!")
         self.process_button.setEnabled(True)
+        self.cancel_button.hide()
+        self.cancel_button.setEnabled(False)
         
         self.export_tsv_button.setEnabled(True)
         self.export_csv_button.setEnabled(True)
     
     def on_blast_error(self, error_msg):
         """Handle BLASTN errors"""
+        self.cancel_button.hide()
+        self.cancel_button.setEnabled(False)
         self.summary_panel.hide()
         self.output_text.setPlainText(f"Error running BLASTN:\n\n{error_msg}")
         self.status_label.setText("Error occurred")

@@ -12,6 +12,7 @@ class BLASTNWorker(QThread):
     """Worker thread to run BLASTN without freezing the GUI"""
     finished = pyqtSignal(str, list)  # HTML, SearchHit objects
     error = pyqtSignal(str)
+    progress = pyqtSignal(str)  # Progress message
     
     # Default advanced parameters for BLASTN
     DEFAULT_PARAMS = {
@@ -27,17 +28,32 @@ class BLASTNWorker(QThread):
         'task': 'blastn'  # Options: blastn, blastn-short, megablast, dc-megablast
     }
     
+    # Timeout in seconds (5 minutes for remote, longer queries may need more)
+    REMOTE_TIMEOUT = 300  # 5 minutes
+    LOCAL_TIMEOUT = 120   # 2 minutes
+    
     def __init__(self, sequence, database, use_remote=True, local_db_path="", advanced_params=None):
         super().__init__()
         self.sequence = sequence
         self.database = database
         self.use_remote = use_remote
         self.local_db_path = local_db_path
+        self._cancelled = False
+        self._process = None
         
         # Merge default params with provided params
         self.params = self.DEFAULT_PARAMS.copy()
         if advanced_params:
             self.params.update(advanced_params)
+    
+    def cancel(self):
+        """Cancel the running BLAST search"""
+        self._cancelled = True
+        if self._process:
+            try:
+                self._process.terminate()
+            except:
+                pass
     
     def run(self):
         try:
@@ -80,6 +96,7 @@ class BLASTNWorker(QThread):
             
             if self.use_remote:
                 cmd.extend(['-remote', '-db', self.database])
+                timeout = self.REMOTE_TIMEOUT
             else:
                 # For local database
                 if self.local_db_path:
@@ -89,9 +106,57 @@ class BLASTNWorker(QThread):
                     local_db = os.path.join(blast_db_dir, self.database)
                 
                 cmd.extend(['-db', local_db])
+                timeout = self.LOCAL_TIMEOUT
             
-            # Execute BLASTN
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            # Check if cancelled before starting
+            if self._cancelled:
+                return
+            
+            # Execute BLASTN with timeout
+            self.progress.emit("Starting BLAST search...")
+            try:
+                self._process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                try:
+                    stdout, stderr = self._process.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    self._process.kill()
+                    self._process.communicate()
+                    self.error.emit(
+                        f"Search timed out after {timeout // 60} minutes.\n\n"
+                        "Remote NCBI BLAST searches can take a very long time for large databases.\n\n"
+                        "Try:\n"
+                        "• Using a smaller database (e.g., refseq_rna instead of nt)\n"
+                        "• Reducing the sequence length\n"
+                        "• Using megablast algorithm for faster (but less sensitive) search"
+                    )
+                    # Cleanup temp files
+                    try:
+                        os.unlink(query_path)
+                    except:
+                        pass
+                    return
+                
+                if self._cancelled:
+                    # Cleanup and exit
+                    try:
+                        os.unlink(query_path)
+                    except:
+                        pass
+                    return
+                
+                if self._process.returncode != 0:
+                    raise subprocess.CalledProcessError(self._process.returncode, cmd, stdout, stderr)
+                    
+            except subprocess.CalledProcessError as e:
+                raise e
+            
+            self.progress.emit("Parsing results...")
             
             # Parse results
             html_results = self.parse_blast_xml(output_path)
@@ -104,9 +169,11 @@ class BLASTNWorker(QThread):
             self.finished.emit(html_results, structured_data)
             
         except subprocess.CalledProcessError as e:
-            self.error.emit(f"BLASTN error: {e.stderr}")
+            error_msg = e.stderr if hasattr(e, 'stderr') and e.stderr else str(e)
+            self.error.emit(f"BLASTN error: {error_msg}")
         except Exception as e:
-            self.error.emit(f"Error: {str(e)}")
+            if not self._cancelled:
+                self.error.emit(f"Error: {str(e)}")
     
     def get_evalue_color(self, evalue):
         """Get color based on E-value (lower is better)"""
