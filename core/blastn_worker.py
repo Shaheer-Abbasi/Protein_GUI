@@ -1,3 +1,4 @@
+"""Worker thread for running BLASTN (nucleotide BLAST) searches"""
 import subprocess
 import tempfile
 import os
@@ -7,23 +8,29 @@ from core.config_manager import get_config
 from utils.results_parser import BLASTResultsParser
 
 
-class BLASTWorker(QThread):
-    """Worker thread to run BLAST without freezing the GUI"""
+class BLASTNWorker(QThread):
+    """Worker thread to run BLASTN without freezing the GUI"""
     finished = pyqtSignal(str, list)  # HTML, SearchHit objects
     error = pyqtSignal(str)
+    progress = pyqtSignal(str)  # Progress message
     
-    # Default advanced parameters
+    # Default advanced parameters for BLASTN
     DEFAULT_PARAMS = {
         'evalue': 10,
         'max_target_seqs': 100,
-        'matrix': 'BLOSUM62',
-        'word_size': 6,
-        'gap_open': 11,
-        'gap_extend': 1,
-        'seg': 'yes',
+        'word_size': 11,  # Default for blastn (megablast uses 28)
+        'reward': 2,      # Match reward
+        'penalty': -3,    # Mismatch penalty
+        'gap_open': 5,    # Gap opening cost
+        'gap_extend': 2,  # Gap extension cost
+        'dust': 'yes',    # DUST filter for low complexity (equivalent to SEG for proteins)
         'soft_masking': False,
-        'comp_based_stats': 2
+        'task': 'blastn'  # Options: blastn, blastn-short, megablast, dc-megablast
     }
+    
+    # Timeout in seconds (5 minutes for remote, longer queries may need more)
+    REMOTE_TIMEOUT = 300  # 5 minutes
+    LOCAL_TIMEOUT = 120   # 2 minutes
     
     def __init__(self, sequence, database, use_remote=True, local_db_path="", advanced_params=None):
         super().__init__()
@@ -31,11 +38,22 @@ class BLASTWorker(QThread):
         self.database = database
         self.use_remote = use_remote
         self.local_db_path = local_db_path
+        self._cancelled = False
+        self._process = None
         
         # Merge default params with provided params
         self.params = self.DEFAULT_PARAMS.copy()
         if advanced_params:
             self.params.update(advanced_params)
+    
+    def cancel(self):
+        """Cancel the running BLAST search"""
+        self._cancelled = True
+        if self._process:
+            try:
+                self._process.terminate()
+            except:
+                pass
     
     def run(self):
         try:
@@ -46,31 +64,31 @@ class BLASTWorker(QThread):
             
             output_path = tempfile.mktemp(suffix='.xml')
             
-            # Get BLASTP path from config (portable across machines)
+            # Get BLASTN path from config
             config = get_config()
-            blastp_path = config.get_blast_path()
+            blastn_path = config.get_blastn_path()
             
-            # Build command based on remote vs local database
+            # Build command
             cmd = [
-                blastp_path,
+                blastn_path,
                 '-query', query_path,
                 '-outfmt', '5',  # XML format for Biopython parsing
                 '-out', output_path,
-                # Advanced parameters
+                '-task', self.params['task'],
                 '-evalue', str(self.params['evalue']),
                 '-max_target_seqs', str(self.params['max_target_seqs']),
-                '-matrix', self.params['matrix'],
                 '-word_size', str(self.params['word_size']),
+                '-reward', str(self.params['reward']),
+                '-penalty', str(self.params['penalty']),
                 '-gapopen', str(self.params['gap_open']),
-                '-gapextend', str(self.params['gap_extend']),
-                '-comp_based_stats', str(self.params['comp_based_stats'])
+                '-gapextend', str(self.params['gap_extend'])
             ]
             
-            # Add SEG filter option
-            if self.params['seg'] == 'yes':
-                cmd.extend(['-seg', 'yes'])
+            # Add DUST filter option
+            if self.params['dust'] == 'yes':
+                cmd.extend(['-dust', 'yes'])
             else:
-                cmd.extend(['-seg', 'no'])
+                cmd.extend(['-dust', 'no'])
             
             # Add soft masking if enabled
             if self.params['soft_masking']:
@@ -78,22 +96,69 @@ class BLASTWorker(QThread):
             
             if self.use_remote:
                 cmd.extend(['-remote', '-db', self.database])
+                timeout = self.REMOTE_TIMEOUT
             else:
-                # For local database, use the path relative to project root
+                # For local database
                 if self.local_db_path:
-                    # If user specified a custom path
                     local_db = os.path.join(self.local_db_path, self.database)
                 else:
-                    # Use default local database directory (relative to project root)
                     blast_db_dir = config.get_blast_db_dir()
                     local_db = os.path.join(blast_db_dir, self.database)
                 
                 cmd.extend(['-db', local_db])
+                timeout = self.LOCAL_TIMEOUT
             
-            # Execute BLAST
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            # Check if cancelled before starting
+            if self._cancelled:
+                return
             
-            # Parse results - get both HTML and structured data
+            # Execute BLASTN with timeout
+            self.progress.emit("Starting BLAST search...")
+            try:
+                self._process = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+                
+                try:
+                    stdout, stderr = self._process.communicate(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    self._process.kill()
+                    self._process.communicate()
+                    self.error.emit(
+                        f"Search timed out after {timeout // 60} minutes.\n\n"
+                        "Remote NCBI BLAST searches can take a very long time for large databases.\n\n"
+                        "Try:\n"
+                        "• Using a smaller database (e.g., refseq_rna instead of nt)\n"
+                        "• Reducing the sequence length\n"
+                        "• Using megablast algorithm for faster (but less sensitive) search"
+                    )
+                    # Cleanup temp files
+                    try:
+                        os.unlink(query_path)
+                    except:
+                        pass
+                    return
+                
+                if self._cancelled:
+                    # Cleanup and exit
+                    try:
+                        os.unlink(query_path)
+                    except:
+                        pass
+                    return
+                
+                if self._process.returncode != 0:
+                    raise subprocess.CalledProcessError(self._process.returncode, cmd, stdout, stderr)
+                    
+            except subprocess.CalledProcessError as e:
+                raise e
+            
+            self.progress.emit("Parsing results...")
+            
+            # Parse results
             html_results = self.parse_blast_xml(output_path)
             structured_data = BLASTResultsParser.parse_xml(output_path)
             
@@ -104,9 +169,11 @@ class BLASTWorker(QThread):
             self.finished.emit(html_results, structured_data)
             
         except subprocess.CalledProcessError as e:
-            self.error.emit(f"BLAST error: {e.stderr}")
+            error_msg = e.stderr if hasattr(e, 'stderr') and e.stderr else str(e)
+            self.error.emit(f"BLASTN error: {error_msg}")
         except Exception as e:
-            self.error.emit(f"Error: {str(e)}")
+            if not self._cancelled:
+                self.error.emit(f"Error: {str(e)}")
     
     def get_evalue_color(self, evalue):
         """Get color based on E-value (lower is better)"""
@@ -123,13 +190,13 @@ class BLASTWorker(QThread):
     
     def get_identity_color(self, identity_percent):
         """Get color based on identity percentage"""
-        if identity_percent >= 90:
+        if identity_percent >= 95:
             return "#27ae60"  # Excellent - green
-        elif identity_percent >= 70:
+        elif identity_percent >= 85:
             return "#2ecc71"  # Very good - light green
-        elif identity_percent >= 50:
+        elif identity_percent >= 70:
             return "#f39c12"  # Good - orange
-        elif identity_percent >= 30:
+        elif identity_percent >= 50:
             return "#e67e22"  # Moderate - dark orange
         else:
             return "#e74c3c"  # Poor - red
@@ -143,26 +210,26 @@ class BLASTWorker(QThread):
                 html = []
                 html.append('<html><head><style>')
                 html.append('body { font-family: "Courier New", monospace; font-size: 12px; }')
-                html.append('.header { background-color: #34495e; color: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; }')
+                html.append('.header { background-color: #1e8449; color: white; padding: 15px; border-radius: 5px; margin-bottom: 20px; }')
                 html.append('.header h1 { margin: 0; font-size: 20px; }')
-                html.append('.info { background-color: #ecf0f1; padding: 10px; border-radius: 5px; margin-bottom: 15px; }')
+                html.append('.info { background-color: #e8f6f3; padding: 10px; border-radius: 5px; margin-bottom: 15px; }')
                 html.append('.hit { background-color: #ffffff; border: 1px solid #bdc3c7; padding: 15px; margin-bottom: 15px; border-radius: 5px; }')
-                html.append('.hit-title { font-size: 14px; font-weight: bold; color: #2c3e50; margin-bottom: 10px; }')
+                html.append('.hit-title { font-size: 14px; font-weight: bold; color: #1e8449; margin-bottom: 10px; }')
                 html.append('.stats { margin: 10px 0; }')
                 html.append('.stat-row { margin: 5px 0; }')
                 html.append('.stat-label { font-weight: bold; color: #7f8c8d; }')
-                html.append('.alignment { background-color: #f8f9fa; padding: 10px; border-radius: 3px; font-family: "Courier New", monospace; margin-top: 10px; }')
+                html.append('.alignment { background-color: #f8f9fa; padding: 10px; border-radius: 3px; font-family: "Courier New", monospace; margin-top: 10px; overflow-x: auto; }')
                 html.append('.no-results { color: #95a5a6; font-style: italic; text-align: center; padding: 30px; }')
                 html.append('</style></head><body>')
                 
                 for blast_record in blast_records:
                     html.append(f'<div class="header">')
-                    html.append(f'<h1>BLASTP SEARCH RESULTS</h1>')
+                    html.append(f'<h1>🧬 BLASTN SEARCH RESULTS</h1>')
                     html.append(f'</div>')
                     
                     html.append(f'<div class="info">')
                     html.append(f'<b>Query:</b> {blast_record.query}<br>')
-                    html.append(f'<b>Query Length:</b> {blast_record.query_length} amino acids<br>')
+                    html.append(f'<b>Query Length:</b> {blast_record.query_length} nucleotides<br>')
                     html.append(f'<b>Database:</b> {blast_record.database}<br>')
                     html.append(f'<b>Sequences in Database:</b> {blast_record.database_sequences:,}')
                     html.append(f'</div>')
@@ -175,24 +242,26 @@ class BLASTWorker(QThread):
                         for i, alignment in enumerate(blast_record.alignments, 1):
                             html.append(f'<div class="hit">')
                             html.append(f'<div class="hit-title">#{i}. {alignment.title}</div>')
-                            html.append(f'<span style="color: #7f8c8d;">Length: {alignment.length} amino acids</span>')
+                            html.append(f'<span style="color: #7f8c8d;">Length: {alignment.length} nucleotides</span>')
                             
-                            # Get the best HSP (High-scoring Segment Pair)
                             if alignment.hsps:
                                 hsp = alignment.hsps[0]  # Best HSP
                                 identity_percent = (hsp.identities/hsp.align_length)*100
-                                positive_percent = (hsp.positives/hsp.align_length)*100
-                                gap_percent = (hsp.gaps/hsp.align_length)*100
+                                gap_percent = (hsp.gaps/hsp.align_length)*100 if hsp.gaps else 0
                                 
                                 evalue_color = self.get_evalue_color(hsp.expect)
                                 identity_color = self.get_identity_color(identity_percent)
+                                
+                                # Determine strand
+                                query_strand = "Plus" if hsp.query_start < hsp.query_end else "Minus"
+                                subject_strand = "Plus" if hsp.sbjct_start < hsp.sbjct_end else "Minus"
                                 
                                 html.append(f'<div class="stats">')
                                 html.append(f'<div class="stat-row"><span class="stat-label">Score:</span> <b>{hsp.score}</b> bits</div>')
                                 html.append(f'<div class="stat-row"><span class="stat-label">E-value:</span> <b style="color: {evalue_color};">{hsp.expect:.2e}</b></div>')
                                 html.append(f'<div class="stat-row"><span class="stat-label">Identity:</span> <b style="color: {identity_color};">{hsp.identities}/{hsp.align_length} ({identity_percent:.1f}%)</b></div>')
-                                html.append(f'<div class="stat-row"><span class="stat-label">Positives:</span> <b>{hsp.positives}/{hsp.align_length} ({positive_percent:.1f}%)</b></div>')
                                 html.append(f'<div class="stat-row"><span class="stat-label">Gaps:</span> {hsp.gaps}/{hsp.align_length} ({gap_percent:.1f}%)</div>')
+                                html.append(f'<div class="stat-row"><span class="stat-label">Strand:</span> Query: {query_strand} / Subject: {subject_strand}</div>')
                                 html.append(f'</div>')
                                 
                                 # Show alignment
@@ -200,7 +269,7 @@ class BLASTWorker(QThread):
                                 html.append(f'<b>Alignment</b> (Query: {hsp.query_start}-{hsp.query_end}, Subject: {hsp.sbjct_start}-{hsp.sbjct_end})<br><br>')
                                 html.append(f'<span style="color: #2980b9;">Query:</span> {hsp.query}<br>')
                                 html.append(f'<span style="color: #7f8c8d;">      {hsp.match}</span><br>')
-                                html.append(f'<span style="color: #27ae60;">Sbjct:</span> {hsp.sbjct}')
+                                html.append(f'<span style="color: #1e8449;">Sbjct:</span> {hsp.sbjct}')
                                 html.append(f'</div>')
                             
                             html.append(f'</div>')
@@ -212,3 +281,4 @@ class BLASTWorker(QThread):
                 
         except Exception as e:
             return f'<html><body><div style="color: red; padding: 20px;">Error parsing BLAST results: {str(e)}</div></body></html>'
+
