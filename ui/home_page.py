@@ -190,6 +190,15 @@ class HomePage(QWidget):
                 "pressed": "#149174",
                 "row": 2, "col": 0
             },
+            {
+                "id": "motif_search",
+                "title": "Motif Search",
+                "desc": "Find glycosylation motifs in protein sequences with phylogeny-based visualization",
+                "color": "#e91e63",
+                "hover": "#c2185b",
+                "pressed": "#ad1457",
+                "row": 2, "col": 1
+            },
         ]
         
         for svc in services:
@@ -202,11 +211,7 @@ class HomePage(QWidget):
             )
             card.clicked.connect(lambda checked=False, sid=svc["id"]: self.service_selected.emit(sid))
             
-            # Last item spans 2 columns if it's alone in its row
-            if svc["id"] == "alignment":
-                grid_layout.addWidget(card, svc["row"], svc["col"], 1, 2)
-            else:
-                grid_layout.addWidget(card, svc["row"], svc["col"])
+            grid_layout.addWidget(card, svc["row"], svc["col"])
         
         # Assemble layout
         layout.addWidget(welcome_frame)
