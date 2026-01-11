@@ -7,6 +7,7 @@ from ui.blastn_page import BLASTNPage
 from ui.mmseqs_page import MMseqsPage
 from ui.clustering_page import ClusteringPage
 from ui.alignment_page import AlignmentPage
+from ui.motif_search_page import MotifSearchPage
 
 
 class ProteinGUI(QMainWindow):
@@ -51,6 +52,7 @@ class ProteinGUI(QMainWindow):
         self.mmseqs_page = MMseqsPage()
         self.clustering_page = ClusteringPage()
         self.alignment_page = AlignmentPage()
+        self.motif_search_page = MotifSearchPage()
         
         # Add pages to stack
         self.stacked_widget.addWidget(self.home_page)
@@ -59,6 +61,7 @@ class ProteinGUI(QMainWindow):
         self.stacked_widget.addWidget(self.mmseqs_page)
         self.stacked_widget.addWidget(self.clustering_page)
         self.stacked_widget.addWidget(self.alignment_page)
+        self.stacked_widget.addWidget(self.motif_search_page)
         
         # Connect signals
         self.home_page.service_selected.connect(self.show_service_page)
@@ -67,6 +70,7 @@ class ProteinGUI(QMainWindow):
         self.mmseqs_page.back_requested.connect(self.show_home_page)
         self.clustering_page.back_requested.connect(self.show_home_page)
         self.alignment_page.back_requested.connect(self.show_home_page)
+        self.motif_search_page.back_requested.connect(self.show_home_page)
         
         # Connect clustering navigation signals
         self.blast_page.navigate_to_clustering.connect(self.show_clustering_with_fasta)
@@ -103,6 +107,9 @@ class ProteinGUI(QMainWindow):
         elif service == "alignment":
             self.stacked_widget.setCurrentWidget(self.alignment_page)
             self.setWindowTitle("Sen Lab - Sequence Alignment")
+        elif service == "motif_search":
+            self.stacked_widget.setCurrentWidget(self.motif_search_page)
+            self.setWindowTitle("Sen Lab - Motif Search")
     
     def show_clustering_with_fasta(self, fasta_path: str, clustering_params: dict):
         """Show clustering page with pre-loaded FASTA and parameters"""
