@@ -199,6 +199,15 @@ class HomePage(QWidget):
                 "pressed": "#ad1457",
                 "row": 2, "col": 1
             },
+            {
+                "id": "database_downloads",
+                "title": "Database Downloads",
+                "desc": "Download and manage protein databases for BLAST and MMseqs2 searches",
+                "color": "#00897b",
+                "hover": "#00796b",
+                "pressed": "#00695c",
+                "row": 3, "col": 0
+            },
         ]
         
         for svc in services:

@@ -1,0 +1,404 @@
+{
+  "version": "1.1.0",
+  "last_updated": "2026-01-11",
+  "manifest_url": "https://sen-lab-protein-databases.s3.us-east-2.amazonaws.com/databases_manifest.json",
+  "databases": [
+    {
+      "id": "swissprot_blast",
+      "display_name": "SwissProt (BLAST)",
+      "description": "Curated protein sequence database with high-quality annotations. Excellent for initial searches and well-characterized proteins.",
+      "tool_formats": ["blast"],
+      "size_gb": 0.21,
+      "disk_required_gb": 0.8,
+      "last_updated": "2026-01-11",
+      "version": "2026-01-11",
+      "category": "starter",
+      "distribution": {
+        "type": "s3",
+        "url": "https://sen-lab-protein-databases.s3.us-east-2.amazonaws.com/databases/swissprot/2026-01-11/swissprot_blast.zip",
+        "sha256": "93db884010c2fa67780af40e97cb359034ea92f445d14c7382eb07d5d20705a1",
+        "compressed": true
+      }
+    },
+    {
+      "id": "swissprot_mmseqs",
+      "display_name": "SwissProt (MMseqs2)",
+      "description": "SwissProt database pre-formatted for MMseqs2. Fast sensitive searching for curated proteins.",
+      "tool_formats": ["mmseqs"],
+      "size_gb": 0.13,
+      "disk_required_gb": 0.5,
+      "last_updated": "2026-01-11",
+      "version": "2026-01-11",
+      "category": "starter",
+      "distribution": {
+        "type": "s3",
+        "url": "https://sen-lab-protein-databases.s3.us-east-2.amazonaws.com/databases/swissprot/2026-01-11/swissprot_mmseqs.zip",
+        "sha256": "227195aa0c4eef42e388bc6fff15c834b9b64fae8fce020556dd7fc260762292",
+        "compressed": true
+      }
+    },
+    {
+      "id": "pdbaa",
+      "display_name": "PDB Proteins (pdbaa)",
+      "description": "Protein sequences from the Protein Data Bank. Essential for finding proteins with known 3D structures.",
+      "tool_formats": ["blast"],
+      "size_gb": 0.15,
+      "disk_required_gb": 0.5,
+      "last_updated": "2026-01-11",
+      "version": "2026-01-11",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "pdbaa"
+        }
+      }
+    },
+    {
+      "id": "landmark",
+      "display_name": "Landmark (Model Organisms)",
+      "description": "Proteomes of 27 model organisms for fast initial searches. Includes human, mouse, yeast, E. coli, etc.",
+      "tool_formats": ["blast"],
+      "size_gb": 0.3,
+      "disk_required_gb": 1.0,
+      "last_updated": "2026-01-11",
+      "version": "2026-01-11",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "landmark"
+        }
+      }
+    },
+    {
+      "id": "refseq_select_prot",
+      "display_name": "RefSeq Select Proteins",
+      "description": "Curated subset of RefSeq proteins - one representative transcript per protein-coding gene. High quality, smaller size.",
+      "tool_formats": ["blast"],
+      "size_gb": 2,
+      "disk_required_gb": 6,
+      "last_updated": "2026-01-11",
+      "version": "2026-01-11",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "refseq_select_prot"
+        }
+      }
+    },
+    {
+      "id": "refseq_protein",
+      "display_name": "RefSeq Protein (Full)",
+      "description": "Complete NCBI Reference Sequence protein database. Comprehensive, non-redundant collection of protein sequences.",
+      "tool_formats": ["blast"],
+      "size_gb": 45,
+      "disk_required_gb": 120,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "refseq_protein"
+        }
+      }
+    },
+    {
+      "id": "nr",
+      "display_name": "Non-redundant Proteins (nr)",
+      "description": "All non-redundant protein sequences from GenBank, RefSeq, PDB, SwissProt, PIR, and PRF. The most comprehensive protein database.",
+      "tool_formats": ["blast"],
+      "size_gb": 150,
+      "disk_required_gb": 450,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "nr"
+        }
+      }
+    },
+    {
+      "id": "env_nr",
+      "display_name": "Environmental Proteins (env_nr)",
+      "description": "Metagenomic protein sequences from environmental samples. Useful for studying uncultured organisms.",
+      "tool_formats": ["blast"],
+      "size_gb": 8,
+      "disk_required_gb": 25,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "env_nr"
+        }
+      }
+    },
+    {
+      "id": "tsa_nr",
+      "display_name": "TSA Proteins (tsa_nr)",
+      "description": "Transcriptome Shotgun Assembly proteins - translated from RNA-seq data. Great for non-model organisms.",
+      "tool_formats": ["blast"],
+      "size_gb": 15,
+      "disk_required_gb": 45,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "tsa_nr"
+        }
+      }
+    },
+    {
+      "id": "pataa",
+      "display_name": "Patent Proteins (pataa)",
+      "description": "Protein sequences from patents. Useful for IP research and novel protein discovery.",
+      "tool_formats": ["blast"],
+      "size_gb": 5,
+      "disk_required_gb": 15,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "pataa"
+        }
+      }
+    },
+    {
+      "id": "nt",
+      "display_name": "Nucleotide Collection (nt)",
+      "description": "All GenBank, EMBL, DDBJ nucleotide sequences. The most comprehensive nucleotide database for BLASTN.",
+      "tool_formats": ["blast"],
+      "size_gb": 200,
+      "disk_required_gb": 500,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "nt"
+        }
+      }
+    },
+    {
+      "id": "refseq_rna",
+      "display_name": "RefSeq RNA",
+      "description": "NCBI Reference Sequence RNA transcripts including mRNA, rRNA, and other RNA types.",
+      "tool_formats": ["blast"],
+      "size_gb": 15,
+      "disk_required_gb": 45,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "refseq_rna"
+        }
+      }
+    },
+    {
+      "id": "refseq_select_rna",
+      "display_name": "RefSeq Select RNA",
+      "description": "Curated subset of RefSeq RNA - one representative transcript per gene. Smaller and faster.",
+      "tool_formats": ["blast"],
+      "size_gb": 0.8,
+      "disk_required_gb": 2.5,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "refseq_select_rna"
+        }
+      }
+    },
+    {
+      "id": "16S_ribosomal_RNA",
+      "display_name": "16S Ribosomal RNA",
+      "description": "16S rRNA sequences for bacterial/archaeal identification. Essential for microbiome studies.",
+      "tool_formats": ["blast"],
+      "size_gb": 0.05,
+      "disk_required_gb": 0.2,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "16S_ribosomal_RNA"
+        }
+      }
+    },
+    {
+      "id": "ref_viruses_rep_genomes",
+      "display_name": "Reference Viral Genomes",
+      "description": "Representative genomes from RefSeq for viral species. Compact database for viral identification.",
+      "tool_formats": ["blast"],
+      "size_gb": 0.02,
+      "disk_required_gb": 0.1,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "ref_viruses_rep_genomes"
+        }
+      }
+    },
+    {
+      "id": "ref_prok_rep_genomes",
+      "display_name": "Reference Prokaryote Genomes",
+      "description": "Representative genomes from RefSeq for prokaryotic species. Good for bacterial genomics.",
+      "tool_formats": ["blast"],
+      "size_gb": 25,
+      "disk_required_gb": 75,
+      "last_updated": "2026-01-05",
+      "version": "2026-01-05",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "ncbi_blast_update",
+        "params": {
+          "db_name": "ref_prok_rep_genomes"
+        }
+      }
+    },
+    {
+      "id": "uniref100",
+      "display_name": "UniRef100 (MMseqs2)",
+      "description": "Complete UniRef database - all unique UniProt sequences. Most comprehensive but largest.",
+      "tool_formats": ["mmseqs"],
+      "size_gb": 80,
+      "disk_required_gb": 200,
+      "last_updated": "2026-01-01",
+      "version": "2026_01",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "mmseqs_createdb",
+        "params": {
+          "db_name": "UniRef100",
+          "source_type": "download"
+        }
+      }
+    },
+    {
+      "id": "uniref90",
+      "display_name": "UniRef90 (MMseqs2)",
+      "description": "UniRef clustered at 90% identity. Good balance between comprehensiveness and speed.",
+      "tool_formats": ["mmseqs"],
+      "size_gb": 25,
+      "disk_required_gb": 70,
+      "last_updated": "2026-01-01",
+      "version": "2026_01",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "mmseqs_createdb",
+        "params": {
+          "db_name": "UniRef90",
+          "source_type": "download"
+        }
+      }
+    },
+    {
+      "id": "uniref50",
+      "display_name": "UniRef50 (MMseqs2)",
+      "description": "UniRef clustered at 50% identity. Fastest searches with reduced redundancy.",
+      "tool_formats": ["mmseqs"],
+      "size_gb": 8,
+      "disk_required_gb": 25,
+      "last_updated": "2026-01-01",
+      "version": "2026_01",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "mmseqs_createdb",
+        "params": {
+          "db_name": "UniRef50",
+          "source_type": "download"
+        }
+      }
+    },
+    {
+      "id": "uniprot_sprot",
+      "display_name": "UniProt Swiss-Prot (MMseqs2)",
+      "description": "Curated UniProt sequences via MMseqs2 download. Alternative to S3 starter pack.",
+      "tool_formats": ["mmseqs"],
+      "size_gb": 0.3,
+      "disk_required_gb": 1.0,
+      "last_updated": "2026-01-01",
+      "version": "2026_01",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "mmseqs_createdb",
+        "params": {
+          "db_name": "UniProtKB/Swiss-Prot",
+          "source_type": "download"
+        }
+      }
+    },
+    {
+      "id": "uniprot_trembl",
+      "display_name": "UniProt TrEMBL",
+      "description": "Automatically annotated protein sequences. Much larger than Swiss-Prot but less curated.",
+      "tool_formats": ["blast", "mmseqs"],
+      "size_gb": 120,
+      "disk_required_gb": 350,
+      "last_updated": "2025-12-15",
+      "version": "2025_06",
+      "category": "full",
+      "distribution": {
+        "type": "external",
+        "url": "https://www.uniprot.org/downloads",
+        "notes": "Very large download. Available in FASTA format - requires conversion to BLAST/MMseqs format."
+      }
+    },
+    {
+      "id": "alphafold",
+      "display_name": "AlphaFold DB (MMseqs2)",
+      "description": "AlphaFold protein structure predictions. Search against proteins with predicted structures.",
+      "tool_formats": ["mmseqs"],
+      "size_gb": 50,
+      "disk_required_gb": 150,
+      "last_updated": "2025-12-01",
+      "version": "v4",
+      "category": "full",
+      "distribution": {
+        "type": "installer",
+        "installer_kind": "mmseqs_createdb",
+        "params": {
+          "db_name": "Alphafold/UniProt",
+          "source_type": "download"
+        }
+      }
+    }
+  ]
+}

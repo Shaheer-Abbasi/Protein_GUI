@@ -76,6 +76,20 @@ blast_databases/
 mmseqs_databases/
 nr.001/
 
+# S3 upload packages (generated, large)
+s3_upload/
+
+# Downloaded databases
+databases/
+
+# Cache files
+databases_manifest_cache.json
+updates_test.json
+updates.json
+
+# Installed databases tracker (local state)
+installed_databases.json
+
 Protein-GUI-code.zip
 
 

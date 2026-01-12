@@ -1,0 +1,121 @@
+name: Weekly Database Update
+
+on:
+  # Run every Sunday at 2:00 AM UTC
+  schedule:
+    - cron: '0 2 * * 0'
+  
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+    inputs:
+      force_update:
+        description: 'Force update even if no new versions detected'
+        required: false
+        default: 'false'
+        type: boolean
+      update_starter_packs:
+        description: 'Re-download and upload starter pack databases'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  S3_BUCKET: sen-lab-protein-databases
+  AWS_REGION: us-east-2
+
+jobs:
+  check-and-update:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install dependencies
+        run: |
+          pip install requests boto3
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Check for database updates
+        id: check_updates
+        run: |
+          python scripts/check_database_updates.py \
+            --output updates.json \
+            ${{ github.event.inputs.force_update == 'true' && '--force' || '' }}
+          
+          # Read the output
+          if [ -f updates.json ]; then
+            echo "updates_available=$(cat updates.json | python -c 'import sys,json; print(json.load(sys.stdin).get(\"updates_available\", False))')" >> $GITHUB_OUTPUT
+          else
+            echo "updates_available=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Update manifest
+        if: steps.check_updates.outputs.updates_available == 'True' || github.event.inputs.force_update == 'true'
+        run: |
+          python scripts/update_manifest.py \
+            --manifest databases_manifest.json \
+            --updates updates.json
+      
+      - name: Update starter packs (if requested)
+        if: github.event.inputs.update_starter_packs == 'true'
+        run: |
+          echo "Starter pack update requested - this would download and repackage databases"
+          # For now, just log - full implementation would:
+          # 1. Download latest SwissProt from UniProt
+          # 2. Format for BLAST using makeblastdb
+          # 3. Create MMseqs2 database
+          # 4. Package and upload to S3
+          # This requires more compute and time than the free tier typically allows
+          echo "::warning::Starter pack updates require manual intervention for large databases"
+      
+      - name: Upload manifest to S3
+        if: steps.check_updates.outputs.updates_available == 'True' || github.event.inputs.force_update == 'true'
+        run: |
+          aws s3 cp databases_manifest.json s3://${{ env.S3_BUCKET }}/databases_manifest.json \
+            --content-type "application/json" \
+            --cache-control "max-age=3600"
+          
+          echo "✓ Manifest uploaded to S3"
+      
+      - name: Commit updated manifest
+        if: steps.check_updates.outputs.updates_available == 'True' || github.event.inputs.force_update == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add databases_manifest.json
+          git diff --staged --quiet || git commit -m "chore: update database manifest [automated]"
+          git push
+      
+      - name: Summary
+        run: |
+          echo "## Database Update Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f updates.json ]; then
+            python -c "
+          import json
+          with open('updates.json') as f:
+              data = json.load(f)
+          print('### Updates Detected')
+          if data.get('updates'):
+              for db, info in data['updates'].items():
+                  print(f'- **{db}**: {info.get(\"old_version\", \"N/A\")} → {info.get(\"new_version\", \"N/A\")}')
+          else:
+              print('No updates detected.')
+          print()
+          print(f'**Manifest version**: {data.get(\"new_manifest_version\", \"N/A\")}')
+          " >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No updates file generated." >> $GITHUB_STEP_SUMMARY
+          fi
