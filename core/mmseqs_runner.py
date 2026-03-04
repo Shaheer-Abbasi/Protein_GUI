@@ -1,11 +1,11 @@
-"""Worker thread for running MMseqs2 searches via WSL"""
+"""Worker thread for running MMseqs2 searches (cross-platform)"""
 import subprocess
 import tempfile
 import os
 import shutil
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from core.wsl_utils import run_wsl_command, windows_path_to_wsl, WSLError
+from core.wsl_utils import run_wsl_command, convert_path_for_tool, WSLError
 from utils.results_parser import MMSeqsResultsParser
 
 
@@ -17,81 +17,74 @@ class MMseqsWorker(QThread):
     def __init__(self, sequence, database_path, sensitivity="sensitive"):
         super().__init__()
         self.sequence = sequence
-        self.database_path = database_path  # Windows path
+        self.database_path = database_path
         self.sensitivity = sensitivity
     
     def run(self):
         try:
-            # Create temporary directory for MMseqs2 work
-            temp_dir_windows = tempfile.mkdtemp(prefix='mmseqs_search_')
+            temp_dir = tempfile.mkdtemp(prefix='mmseqs_search_')
             
-            # Create query FASTA file
-            query_fasta_windows = os.path.join(temp_dir_windows, 'query.fasta')
-            with open(query_fasta_windows, 'w') as f:
+            query_fasta = os.path.join(temp_dir, 'query.fasta')
+            with open(query_fasta, 'w') as f:
                 f.write(f">query\n{self.sequence}\n")
             
-            # Convert paths to WSL
-            temp_dir_wsl = windows_path_to_wsl(temp_dir_windows)
-            query_fasta_wsl = windows_path_to_wsl(query_fasta_windows)
-            database_wsl = windows_path_to_wsl(self.database_path)
+            # Convert paths for the tool execution environment
+            temp_dir_tool = convert_path_for_tool(temp_dir)
+            query_fasta_tool = convert_path_for_tool(query_fasta)
+            database_tool = convert_path_for_tool(self.database_path)
             
-            # Create MMseqs2 database from query
-            query_db_wsl = f"{temp_dir_wsl}/queryDB"
-            result_db_wsl = f"{temp_dir_wsl}/resultDB"
-            tmp_folder_wsl = f"{temp_dir_wsl}/tmp"
-            output_file_wsl = f"{temp_dir_wsl}/results.m8"
+            query_db_tool = f"{temp_dir_tool}/queryDB"
+            result_db_tool = f"{temp_dir_tool}/resultDB"
+            tmp_folder_tool = f"{temp_dir_tool}/tmp"
+            output_file_tool = f"{temp_dir_tool}/results.m8"
             
-            # Create tmp folder
-            tmp_folder_windows = os.path.join(temp_dir_windows, 'tmp')
-            os.makedirs(tmp_folder_windows, exist_ok=True)
+            tmp_folder = os.path.join(temp_dir, 'tmp')
+            os.makedirs(tmp_folder, exist_ok=True)
             
             # Step 1: Create query database
-            cmd_createdb = f'mmseqs createdb "{query_fasta_wsl}" "{query_db_wsl}"'
+            cmd_createdb = f'mmseqs createdb "{query_fasta_tool}" "{query_db_tool}"'
             result = run_wsl_command(cmd_createdb, timeout=60)
             
             if result.returncode != 0:
                 self.error.emit(f"Error creating query database:\n{result.stderr}")
-                shutil.rmtree(temp_dir_windows, ignore_errors=True)
+                shutil.rmtree(temp_dir, ignore_errors=True)
                 return
             
             # Step 2: Run search
             sensitivity_value = self.get_sensitivity_value()
-            cmd_search = f'mmseqs search "{query_db_wsl}" "{database_wsl}" "{result_db_wsl}" "{tmp_folder_wsl}" -s {sensitivity_value}'
+            cmd_search = f'mmseqs search "{query_db_tool}" "{database_tool}" "{result_db_tool}" "{tmp_folder_tool}" -s {sensitivity_value}'
             
-            result = run_wsl_command(cmd_search, timeout=300)  # 5 minute timeout
+            result = run_wsl_command(cmd_search, timeout=300)
             
             if result.returncode != 0:
                 self.error.emit(f"MMseqs2 search error:\n{result.stderr}\n\nStdout:\n{result.stdout}")
-                shutil.rmtree(temp_dir_windows, ignore_errors=True)
+                shutil.rmtree(temp_dir, ignore_errors=True)
                 return
             
             # Step 3: Convert results to readable format
-            # Include theader to get target description (e.g., "Cytochrome c")
-            cmd_convertalis = f'mmseqs convertalis "{query_db_wsl}" "{database_wsl}" "{result_db_wsl}" "{output_file_wsl}" --format-output "query,target,theader,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits"'
+            cmd_convertalis = f'mmseqs convertalis "{query_db_tool}" "{database_tool}" "{result_db_tool}" "{output_file_tool}" --format-output "query,target,theader,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits"'
             
             result = run_wsl_command(cmd_convertalis, timeout=60)
             
             if result.returncode != 0:
                 self.error.emit(f"Error converting results:\n{result.stderr}")
-                shutil.rmtree(temp_dir_windows, ignore_errors=True)
+                shutil.rmtree(temp_dir, ignore_errors=True)
                 return
             
             # Read and format results
-            output_file_windows = os.path.join(temp_dir_windows, 'results.m8')
-            formatted_results = self.format_results(output_file_windows, result.stdout, result.stderr)
+            output_file = os.path.join(temp_dir, 'results.m8')
+            formatted_results = self.format_results(output_file, result.stdout, result.stderr)
             
-            # Parse structured data from M8 file
-            structured_data = MMSeqsResultsParser.parse_m8(output_file_windows) if os.path.exists(output_file_windows) else []
+            structured_data = MMSeqsResultsParser.parse_m8(output_file) if os.path.exists(output_file) else []
             
-            # Cleanup
-            shutil.rmtree(temp_dir_windows, ignore_errors=True)
+            shutil.rmtree(temp_dir, ignore_errors=True)
             
             self.finished.emit(formatted_results, structured_data)
             
         except subprocess.TimeoutExpired:
             self.error.emit("MMseqs2 search timed out after 5 minutes.")
         except WSLError as e:
-            self.error.emit(f"WSL error: {str(e)}")
+            self.error.emit(f"Execution error: {str(e)}")
         except Exception as e:
             import traceback
             self.error.emit(f"Error: {str(e)}\n\n{traceback.format_exc()}")
@@ -111,34 +104,34 @@ class MMseqsWorker(QThread):
         try:
             evalue = float(evalue_str)
             if evalue < 1e-100:
-                return "#27ae60"  # Excellent - green
+                return "#27ae60"
             elif evalue < 1e-50:
-                return "#2ecc71"  # Very good - light green
+                return "#2ecc71"
             elif evalue < 1e-10:
-                return "#f39c12"  # Good - orange
+                return "#f39c12"
             elif evalue < 1e-5:
-                return "#e67e22"  # Moderate - dark orange
+                return "#e67e22"
             else:
-                return "#e74c3c"  # Poor - red
+                return "#e74c3c"
         except:
-            return "#7f8c8d"  # Default gray
+            return "#7f8c8d"
     
     def get_identity_color(self, identity_str):
         """Get color based on identity percentage"""
         try:
             identity = float(identity_str)
             if identity >= 90:
-                return "#27ae60"  # Excellent - green
+                return "#27ae60"
             elif identity >= 70:
-                return "#2ecc71"  # Very good - light green
+                return "#2ecc71"
             elif identity >= 50:
-                return "#f39c12"  # Good - orange
+                return "#f39c12"
             elif identity >= 30:
-                return "#e67e22"  # Moderate - dark orange
+                return "#e67e22"
             else:
-                return "#e74c3c"  # Poor - red
+                return "#e74c3c"
         except:
-            return "#7f8c8d"  # Default gray
+            return "#7f8c8d"
     
     def format_results(self, results_file, stdout, stderr):
         """Format MMseqs2 results for display as HTML"""
@@ -160,7 +153,6 @@ class MMseqsWorker(QThread):
         html.append(f'<h1>MMSEQS2 SEARCH RESULTS</h1>')
         html.append(f'</div>')
         
-        # Read and parse results file
         try:
             if os.path.exists(results_file) and os.path.getsize(results_file) > 0:
                 with open(results_file, 'r') as f:
@@ -173,11 +165,9 @@ class MMseqsWorker(QThread):
                         html.append(f' <span style="color: #7f8c8d;">(showing top 20)</span>')
                     html.append(f'</div>')
                     
-                    for i, line in enumerate(lines[:20], 1):  # Limit to top 20 hits
-                        # Parse the tab-separated values
+                    for i, line in enumerate(lines[:20], 1):
                         fields = line.strip().split('\t')
                         if len(fields) >= 13:
-                            # Fields: query, target_acc, target_desc, pident, alnlen, mismatch, gapopen, qstart, qend, tstart, tend, evalue, bits
                             target_acc = fields[1]
                             target_desc = fields[2]
                             identity = fields[3]
@@ -207,7 +197,6 @@ class MMseqsWorker(QThread):
                             
                             html.append(f'</div>')
                         else:
-                            # Fallback for unexpected format
                             html.append(f'<div class="hit">#{i}. {line.strip()}</div>')
                 else:
                     html.append(f'<div class="no-results">No significant alignments found.</div>')

@@ -11,7 +11,7 @@ from PyQt5.QtGui import QFont, QPixmap
 from core.clustering_worker import ClusteringWorker
 from core.clustering_manager import validate_fasta_file, export_clustering_tsv, get_cluster_table_data
 from core.clustering_visualizer import create_distribution_chart, create_text_summary, export_chart_html
-from core.wsl_utils import is_wsl_available, check_mmseqs_installation, warmup_wsl
+from core.wsl_utils import is_wsl_available, check_mmseqs_installation, warmup_wsl, get_platform_tool_install_hint
 from ui.dialogs.chart_maximize_dialog import ChartMaximizeDialog
 
 
@@ -31,9 +31,9 @@ class ClusteringPage(QWidget):
         self.search_start_time = None
         self.init_ui()
         
-        # Warm up WSL first, then check system requirements after a longer delay
+        # Warm up (WSL on Windows, no-op otherwise), then check system requirements
         QTimer.singleShot(100, lambda: warmup_wsl())
-        QTimer.singleShot(2000, self.check_system_requirements)  # Increased delay to 2 seconds
+        QTimer.singleShot(2000, self.check_system_requirements)
         
         # Track if FASTA is from search (temporary)
         self.is_temp_fasta = False
@@ -497,14 +497,13 @@ class ClusteringPage(QWidget):
         self.setLayout(layout)
     
     def check_system_requirements(self):
-        """Check if WSL and MMseqs2 are available"""
-        # Warm up WSL again to ensure it's ready
+        """Check if required tools are available"""
         warmup_wsl()
         
         if not is_wsl_available():
             self.warning_label.setText(
-                "⚠️ WSL not detected. MMseqs2 clustering requires Windows Subsystem for Linux.\n"
-                "Please install WSL to use this feature."
+                "⚠️ Command execution environment not available.\n"
+                "Please check your system setup to use this feature."
             )
             self.warning_label.show()
             self.run_button.setEnabled(False)
@@ -512,15 +511,14 @@ class ClusteringPage(QWidget):
         
         mmseqs_installed, mmseqs_version, mmseqs_path = check_mmseqs_installation()
         if not mmseqs_installed:
+            hint = get_platform_tool_install_hint('mmseqs')
             self.warning_label.setText(
-                "⚠️ MMseqs2 not found in WSL. Please install MMseqs2 to use clustering.\n"
-                "Installation: wget https://mmseqs.com/latest/mmseqs-linux-avx2.tar.gz"
+                f"⚠️ MMseqs2 not found. Please install MMseqs2 to use clustering.\n{hint}"
             )
             self.warning_label.show()
             self.run_button.setEnabled(False)
             return
         
-        # If we get here, everything is good - hide the warning
         self.warning_label.hide()
     
     def browse_fasta_file(self):

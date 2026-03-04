@@ -4,7 +4,7 @@ Database Downloads page for managing protein database installations.
 Provides a UI for:
 - Viewing available databases (starter packs and full databases)
 - Downloading databases from S3
-- Installing databases via WSL tools
+- Installing databases via system tools
 - Opening external links for large databases
 - Tracking installed databases
 """
@@ -604,7 +604,7 @@ class DatabaseDownloadsPage(QWidget):
         self.current_worker.start()
     
     def _on_install_requested(self, entry: DatabaseEntry):
-        """Handle install request for WSL-based installation"""
+        """Handle install request for tool-based installation"""
         if self.current_worker is not None:
             QMessageBox.warning(
                 self, "Operation in Progress",
@@ -624,7 +624,7 @@ class DatabaseDownloadsPage(QWidget):
         
         reply = QMessageBox.question(
             self, "Confirm Installation",
-            f"Install {entry.display_name} via WSL tools?\n\n"
+            f"Install {entry.display_name}?\n\n"
             f"Disk required: {entry.get_disk_required_display()}\n"
             f"Destination: {dest_dir}{warning}",
             QMessageBox.Yes | QMessageBox.No

@@ -1,16 +1,19 @@
-"""Worker thread for running Clustal Omega alignments via WSL"""
+"""Worker thread for running Clustal Omega alignments (cross-platform)"""
 import os
+import subprocess
 import tempfile
 import uuid
 from PyQt5.QtCore import QThread, pyqtSignal
 
 from core.wsl_utils import (
+    is_windows,
     is_wsl_available, 
     check_wsl_command, 
     run_wsl_command, 
     windows_path_to_wsl,
     WSLError,
-    warmup_wsl
+    warmup_wsl,
+    get_platform_tool_install_hint
 )
 
 
@@ -21,15 +24,14 @@ class AlignmentError(Exception):
 
 def check_clustalo_installation():
     """
-    Check if Clustal Omega is installed in WSL.
+    Check if Clustal Omega is installed.
     
     Returns:
         tuple: (installed: bool, version: str or None, path: str or None)
     """
-    if not is_wsl_available():
+    if is_windows() and not is_wsl_available():
         return False, None, None
     
-    # Warm up WSL first
     warmup_wsl()
     
     exists, path = check_wsl_command('clustalo')
@@ -51,31 +53,18 @@ class AlignmentWorker(QThread):
     """
     Worker thread for running Clustal Omega alignments.
     
-    Runs alignments via WSL to leverage Linux-native Clustal Omega.
+    Cross-platform: uses WSL on Windows, native execution on macOS/Linux.
     """
     
-    # Signals
-    progress = pyqtSignal(int, str)  # percent, message
+    progress = pyqtSignal(int, str)
     finished = pyqtSignal(str, str)  # aligned_fasta_content, output_file_path
-    error = pyqtSignal(str)  # error message
+    error = pyqtSignal(str)
     
-    # Alignment parameters
-    DEFAULT_TIMEOUT = 600  # 10 minutes
-    MAX_SEQUENCES = 2000  # Maximum sequences to prevent hanging
+    DEFAULT_TIMEOUT = 600
+    MAX_SEQUENCES = 2000
     
     def __init__(self, input_fasta_path, output_format='fasta', 
                  iterations=0, full_iter=False, force=True, threads=None):
-        """
-        Initialize alignment worker.
-        
-        Args:
-            input_fasta_path: Path to input FASTA file (Windows path)
-            output_format: Output format ('fasta', 'clustal', 'msf', 'phylip', 'selex', 'stockholm', 'vienna')
-            iterations: Number of iterations (0 = auto)
-            full_iter: Use full iterative refinement
-            force: Force overwrite of output file
-            threads: Number of threads (None = auto)
-        """
         super().__init__()
         
         self.input_fasta_path = input_fasta_path
@@ -99,11 +88,9 @@ class AlignmentWorker(QThread):
         try:
             self.progress.emit(0, "Preparing alignment...")
             
-            # Validate input
             if not os.path.exists(self.input_fasta_path):
                 raise AlignmentError(f"Input file not found: {self.input_fasta_path}")
             
-            # Count sequences and validate
             seq_count = self._count_sequences()
             if seq_count < 2:
                 raise AlignmentError("At least 2 sequences are required for alignment")
@@ -114,35 +101,36 @@ class AlignmentWorker(QThread):
                     "Consider reducing the number of sequences or using a different tool."
                 )
             
-            self.progress.emit(10, f"Found {seq_count} sequences. Copying to WSL...")
-            
             if self._cancelled:
                 return
             
-            # Copy input file to WSL temp directory
-            wsl_input_path = self._copy_to_wsl_temp()
+            if is_windows():
+                self.progress.emit(10, f"Found {seq_count} sequences. Copying to WSL...")
+                tool_input_path = self._copy_to_wsl_temp()
+            else:
+                self.progress.emit(10, f"Found {seq_count} sequences. Preparing...")
+                tool_input_path = self._prepare_native_temp()
             
             self.progress.emit(20, "Running Clustal Omega alignment...")
             
             if self._cancelled:
                 return
             
-            # Run Clustal Omega
-            wsl_output_path = self._run_clustalo(wsl_input_path, seq_count)
+            tool_output_path = self._run_clustalo(tool_input_path, seq_count)
             
             self.progress.emit(80, "Reading alignment results...")
             
             if self._cancelled:
                 return
             
-            # Read the output
-            aligned_content = self._read_wsl_output(wsl_output_path)
+            if is_windows():
+                aligned_content = self._read_wsl_output(tool_output_path)
+            else:
+                aligned_content = self._read_native_output(tool_output_path)
             
-            # Save to a Windows temp file (not tracked for cleanup - caller owns it)
             output_path = self._save_output(aligned_content)
             
             self.progress.emit(100, "Alignment complete!")
-            
             self.finished.emit(aligned_content, output_path)
             
         except AlignmentError as e:
@@ -152,8 +140,7 @@ class AlignmentWorker(QThread):
             self._cleanup_windows_output(output_path)
             self.error.emit(f"Unexpected error: {str(e)}")
         finally:
-            # Always clean up WSL temp files
-            self._cleanup_wsl_temp_files()
+            self._cleanup_temp_files()
     
     def _count_sequences(self):
         """Count sequences in the input FASTA file"""
@@ -167,22 +154,31 @@ class AlignmentWorker(QThread):
             raise AlignmentError(f"Error reading input file: {str(e)}")
         return count
     
+    def _prepare_native_temp(self):
+        """Prepare input in a native temp directory (macOS/Linux)"""
+        unique_id = str(uuid.uuid4())[:8]
+        temp_input = os.path.join(tempfile.gettempdir(), f"alignment_input_{unique_id}.fasta")
+        
+        try:
+            import shutil
+            shutil.copy2(self.input_fasta_path, temp_input)
+        except Exception as e:
+            raise AlignmentError(f"Error copying input file: {str(e)}")
+        
+        self._temp_files.append(('native', temp_input))
+        return temp_input
+    
     def _copy_to_wsl_temp(self):
-        """Copy input file to WSL /tmp directory"""
-        # Generate unique filename
+        """Copy input file to WSL /tmp directory (Windows)"""
         unique_id = str(uuid.uuid4())[:8]
         wsl_input_path = f"/tmp/alignment_input_{unique_id}.fasta"
         
-        # Read the Windows file
         try:
             with open(self.input_fasta_path, 'r', encoding='utf-8') as f:
                 content = f.read()
         except Exception as e:
             raise AlignmentError(f"Error reading input file: {str(e)}")
         
-        # Write to WSL temp using bash heredoc
-        # Note: Using quoted delimiter ('FASTA_EOF') prevents shell expansion,
-        # so content is written literally without needing escaping
         try:
             result = run_wsl_command(
                 f"cat > '{wsl_input_path}' << 'FASTA_EOF'\n{content}\nFASTA_EOF",
@@ -196,16 +192,19 @@ class AlignmentWorker(QThread):
         self._temp_files.append(('wsl', wsl_input_path))
         return wsl_input_path
     
-    def _run_clustalo(self, wsl_input_path, seq_count):
+    def _run_clustalo(self, input_path, seq_count):
         """Run Clustal Omega alignment"""
         unique_id = str(uuid.uuid4())[:8]
-        wsl_output_path = f"/tmp/alignment_output_{unique_id}.aln"
         
-        # Build command
+        if is_windows():
+            output_path = f"/tmp/alignment_output_{unique_id}.aln"
+        else:
+            output_path = os.path.join(tempfile.gettempdir(), f"alignment_output_{unique_id}.aln")
+        
         cmd_parts = [
             'clustalo',
-            '-i', wsl_input_path,
-            '-o', wsl_output_path,
+            '-i', input_path,
+            '-o', output_path,
             f'--outfmt={self.output_format}'
         ]
         
@@ -221,12 +220,9 @@ class AlignmentWorker(QThread):
         if self.threads:
             cmd_parts.extend(['--threads', str(self.threads)])
         
-        # Add verbose output for progress tracking
         cmd_parts.append('--verbose')
         
         cmd = ' '.join(cmd_parts)
-        
-        # Estimate timeout based on sequence count
         timeout = max(self.DEFAULT_TIMEOUT, seq_count * 2)
         
         try:
@@ -242,13 +238,22 @@ class AlignmentWorker(QThread):
                     f"Alignment timed out after {timeout} seconds.\n"
                     "Try reducing the number of sequences or increasing the timeout."
                 )
-            raise AlignmentError(f"WSL error: {str(e)}")
+            raise AlignmentError(f"Execution error: {str(e)}")
         
-        self._temp_files.append(('wsl', wsl_output_path))
-        return wsl_output_path
+        file_type = 'wsl' if is_windows() else 'native'
+        self._temp_files.append((file_type, output_path))
+        return output_path
+    
+    def _read_native_output(self, output_path):
+        """Read alignment output from a native file (macOS/Linux)"""
+        try:
+            with open(output_path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except Exception as e:
+            raise AlignmentError(f"Error reading output: {str(e)}")
     
     def _read_wsl_output(self, wsl_output_path):
-        """Read the alignment output from WSL"""
+        """Read the alignment output from WSL (Windows)"""
         try:
             result = run_wsl_command(f"cat '{wsl_output_path}'", timeout=60)
             
@@ -261,8 +266,7 @@ class AlignmentWorker(QThread):
             raise AlignmentError(f"Error reading output: {str(e)}")
     
     def _save_output(self, content):
-        """Save alignment output to Windows temp file"""
-        # Determine file extension based on format
+        """Save alignment output to a temp file"""
         ext_map = {
             'fasta': '.fasta',
             'clustal': '.aln',
@@ -274,7 +278,6 @@ class AlignmentWorker(QThread):
         }
         ext = ext_map.get(self.output_format, '.aln')
         
-        # Create temp file
         fd, output_path = tempfile.mkstemp(suffix=ext, prefix='alignment_')
         
         try:
@@ -283,31 +286,31 @@ class AlignmentWorker(QThread):
         except Exception as e:
             raise AlignmentError(f"Error saving output: {str(e)}")
         
-        # Note: Don't add to _temp_files - caller owns this file
         return output_path
     
-    def _cleanup_wsl_temp_files(self):
-        """Clean up WSL temporary files only"""
+    def _cleanup_temp_files(self):
+        """Clean up all temporary files"""
         for file_type, path in self._temp_files:
             if file_type == 'wsl':
                 try:
                     run_wsl_command(f"rm -f '{path}'", timeout=10)
                 except:
-                    pass  # Best effort cleanup
+                    pass
+            elif file_type == 'native':
+                try:
+                    os.remove(path)
+                except:
+                    pass
         
         self._temp_files = []
     
     def _cleanup_windows_output(self, output_path):
-        """Clean up Windows output file on error"""
+        """Clean up output file on error"""
         if output_path and os.path.exists(output_path):
             try:
                 os.remove(output_path)
             except:
-                pass  # Best effort cleanup
-    
-    def _cleanup_temp_files(self):
-        """Clean up all temporary files (legacy method for compatibility)"""
-        self._cleanup_wsl_temp_files()
+                pass
 
 
 class SequenceAlignmentPrep:
@@ -330,16 +333,10 @@ class SequenceAlignmentPrep:
                 count = 0
                 for hit in hits:
                     if hasattr(hit, 'sequence') and hit.sequence:
-                        # Clean the sequence
                         seq = hit.sequence.replace(' ', '').replace('\n', '')
-                        
-                        # Get identifier
                         hit_id = getattr(hit, 'id', None) or getattr(hit, 'accession', f'seq_{count+1}')
                         
-                        # Write FASTA entry
                         f.write(f">{hit_id}\n")
-                        
-                        # Write sequence in 80-character lines
                         for i in range(0, len(seq), 80):
                             f.write(seq[i:i+80] + '\n')
                         
@@ -384,7 +381,6 @@ class SequenceAlignmentPrep:
                     elif line:
                         current_seq.append(line)
                 
-                # Don't forget the last sequence
                 if current_seq:
                     seq_len = len(''.join(current_seq))
                     max_len = max(max_len, seq_len)
@@ -400,4 +396,3 @@ class SequenceAlignmentPrep:
             
         except Exception as e:
             return False, f"Error reading file: {str(e)}", 0
-

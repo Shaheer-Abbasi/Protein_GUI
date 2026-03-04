@@ -1,11 +1,11 @@
-"""Worker thread for running MMseqs2 clustering via WSL"""
+"""Worker thread for running MMseqs2 clustering (cross-platform)"""
 import subprocess
 import tempfile
 import os
 import shutil
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from core.wsl_utils import run_wsl_command, windows_path_to_wsl, WSLError
+from core.wsl_utils import run_wsl_command, convert_path_for_tool, WSLError
 
 
 class ClusteringWorker(QThread):
@@ -33,32 +33,29 @@ class ClusteringWorker(QThread):
         self.cancelled = True
     
     def run(self):
-        temp_dir_windows = None
+        temp_dir = None
         
         try:
-            # Create temporary directory for MMseqs2 work
-            temp_dir_windows = tempfile.mkdtemp(prefix='mmseqs_cluster_')
-            temp_dir_wsl = windows_path_to_wsl(temp_dir_windows)
+            temp_dir = tempfile.mkdtemp(prefix='mmseqs_cluster_')
+            temp_dir_tool = convert_path_for_tool(temp_dir)
             
-            # Convert paths to WSL
-            fasta_wsl = windows_path_to_wsl(self.fasta_path)
-            db_wsl = f"{temp_dir_wsl}/DB"
-            clu_wsl = f"{temp_dir_wsl}/DB_clu"
-            tmp_wsl = f"{temp_dir_wsl}/tmp"
-            tsv_wsl = f"{temp_dir_wsl}/DB_clu.tsv"
-            rep_db_wsl = f"{temp_dir_wsl}/DB_clu_rep"
-            rep_fasta_wsl = f"{temp_dir_wsl}/DB_clu_rep.fasta"
+            fasta_tool = convert_path_for_tool(self.fasta_path)
+            db_tool = f"{temp_dir_tool}/DB"
+            clu_tool = f"{temp_dir_tool}/DB_clu"
+            tmp_tool = f"{temp_dir_tool}/tmp"
+            tsv_tool = f"{temp_dir_tool}/DB_clu.tsv"
+            rep_db_tool = f"{temp_dir_tool}/DB_clu_rep"
+            rep_fasta_tool = f"{temp_dir_tool}/DB_clu_rep.fasta"
             
-            # Create tmp folder
-            tmp_folder_windows = os.path.join(temp_dir_windows, 'tmp')
-            os.makedirs(tmp_folder_windows, exist_ok=True)
+            tmp_folder = os.path.join(temp_dir, 'tmp')
+            os.makedirs(tmp_folder, exist_ok=True)
             
             if self.cancelled:
                 return
             
             # Step 1: Create database (0-20%)
             self.progress.emit(5, "Creating MMseqs2 database from FASTA file...")
-            cmd_createdb = f'mmseqs createdb "{fasta_wsl}" "{db_wsl}"'
+            cmd_createdb = f'mmseqs createdb "{fasta_tool}" "{db_tool}"'
             result = run_wsl_command(cmd_createdb, timeout=300)
             
             if result.returncode != 0:
@@ -73,17 +70,15 @@ class ClusteringWorker(QThread):
             # Step 2: Run clustering (20-60%)
             self.progress.emit(25, f"Running {self.mode} clustering (this may take a while)...")
             
-            # Build clustering command based on mode
             if self.mode == "linclust":
-                cmd_cluster = f'mmseqs linclust "{db_wsl}" "{clu_wsl}" "{tmp_wsl}"'
+                cmd_cluster = f'mmseqs linclust "{db_tool}" "{clu_tool}" "{tmp_tool}"'
                 if self.kmer_per_seq:
                     cmd_cluster += f' --kmer-per-seq {self.kmer_per_seq}'
             else:
-                cmd_cluster = f'mmseqs cluster "{db_wsl}" "{clu_wsl}" "{tmp_wsl}"'
+                cmd_cluster = f'mmseqs cluster "{db_tool}" "{clu_tool}" "{tmp_tool}"'
                 if self.single_step:
                     cmd_cluster += ' --single-step-clustering'
             
-            # Add common parameters
             cmd_cluster += f' --min-seq-id {self.min_seq_id}'
             cmd_cluster += f' -c {self.coverage}'
             cmd_cluster += f' --cov-mode {self.cov_mode}'
@@ -92,7 +87,7 @@ class ClusteringWorker(QThread):
             if self.sensitivity is not None:
                 cmd_cluster += f' -s {self.sensitivity}'
             
-            result = run_wsl_command(cmd_cluster, timeout=1800)  # 30 minute timeout
+            result = run_wsl_command(cmd_cluster, timeout=1800)
             
             if result.returncode != 0:
                 self.error.emit(f"Clustering error:\n{result.stderr}\n\nStdout:\n{result.stdout}")
@@ -105,7 +100,7 @@ class ClusteringWorker(QThread):
             
             # Step 3: Create TSV (60-75%)
             self.progress.emit(65, "Extracting clustering results to TSV format...")
-            cmd_createtsv = f'mmseqs createtsv "{db_wsl}" "{db_wsl}" "{clu_wsl}" "{tsv_wsl}"'
+            cmd_createtsv = f'mmseqs createtsv "{db_tool}" "{db_tool}" "{clu_tool}" "{tsv_tool}"'
             result = run_wsl_command(cmd_createtsv, timeout=300)
             
             if result.returncode != 0:
@@ -119,7 +114,7 @@ class ClusteringWorker(QThread):
             
             # Step 4: Create representative database (75-85%)
             self.progress.emit(80, "Extracting representative sequences...")
-            cmd_createsubdb = f'mmseqs createsubdb "{clu_wsl}" "{db_wsl}" "{rep_db_wsl}"'
+            cmd_createsubdb = f'mmseqs createsubdb "{clu_tool}" "{db_tool}" "{rep_db_tool}"'
             result = run_wsl_command(cmd_createsubdb, timeout=300)
             
             if result.returncode != 0:
@@ -133,7 +128,7 @@ class ClusteringWorker(QThread):
             
             # Step 5: Convert to FASTA (85-95%)
             self.progress.emit(90, "Converting representatives to FASTA format...")
-            cmd_convert2fasta = f'mmseqs convert2fasta "{rep_db_wsl}" "{rep_fasta_wsl}"'
+            cmd_convert2fasta = f'mmseqs convert2fasta "{rep_db_tool}" "{rep_fasta_tool}"'
             result = run_wsl_command(cmd_convert2fasta, timeout=300)
             
             if result.returncode != 0:
@@ -143,36 +138,32 @@ class ClusteringWorker(QThread):
             self.progress.emit(95, "Conversion complete")
             
             # Parse results
-            tsv_windows = os.path.join(temp_dir_windows, 'DB_clu.tsv')
-            rep_fasta_windows = os.path.join(temp_dir_windows, 'DB_clu_rep.fasta')
+            tsv_path = os.path.join(temp_dir, 'DB_clu.tsv')
+            rep_fasta_path = os.path.join(temp_dir, 'DB_clu_rep.fasta')
             
-            if not os.path.exists(tsv_windows):
+            if not os.path.exists(tsv_path):
                 self.error.emit("Clustering completed but TSV file not found")
                 return
             
-            if not os.path.exists(rep_fasta_windows):
+            if not os.path.exists(rep_fasta_path):
                 self.error.emit("Clustering completed but representative FASTA file not found")
                 return
             
-            # Import here to avoid circular imports
             from core.clustering_manager import parse_clustering_results
             
             self.progress.emit(98, "Parsing results and generating statistics...")
-            stats = parse_clustering_results(tsv_windows)
+            stats = parse_clustering_results(tsv_path)
             
             self.progress.emit(100, "Clustering complete!")
             
-            self.finished.emit(stats, rep_fasta_windows, tsv_windows)
+            self.finished.emit(stats, rep_fasta_path, tsv_path)
             
         except subprocess.TimeoutExpired:
             self.error.emit("Clustering operation timed out. Please try with a smaller dataset or adjust parameters.")
         except WSLError as e:
-            self.error.emit(f"WSL error: {str(e)}")
+            self.error.emit(f"Execution error: {str(e)}")
         except Exception as e:
             import traceback
             self.error.emit(f"Error: {str(e)}\n\n{traceback.format_exc()}")
         finally:
-            # Note: We don't cleanup temp_dir here because we need the files for results
-            # Cleanup will be handled by the UI after user exports/views results
             pass
-

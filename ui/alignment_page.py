@@ -11,7 +11,7 @@ from PyQt5.QtWidgets import (
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QSettings
 from PyQt5.QtGui import QFont
 
-from core.wsl_utils import is_wsl_available, warmup_wsl
+from core.wsl_utils import is_wsl_available, warmup_wsl, get_platform_tool_install_hint
 from core.alignment_worker import (
     AlignmentWorker, 
     check_clustalo_installation, 
@@ -38,7 +38,7 @@ class AlignmentPage(QWidget):
         
         self.init_ui()
         
-        # Check system requirements after a delay
+        # Warm up (WSL on Windows, no-op otherwise), then check system requirements
         QTimer.singleShot(100, lambda: warmup_wsl())
         QTimer.singleShot(2000, self.check_system_requirements)
     
@@ -440,13 +440,13 @@ class AlignmentPage(QWidget):
             self.paste_widget.show()
     
     def check_system_requirements(self):
-        """Check if WSL and Clustal Omega are available"""
+        """Check if required tools are available"""
         warmup_wsl()
         
         if not is_wsl_available():
             self.warning_label.setText(
-                "⚠️ WSL not detected. Clustal Omega requires Windows Subsystem for Linux.\n"
-                "Please install WSL to use this feature."
+                "⚠️ Command execution environment not available.\n"
+                "Please check your system setup to use this feature."
             )
             self.warning_label.show()
             self.run_button.setEnabled(False)
@@ -454,9 +454,9 @@ class AlignmentPage(QWidget):
         
         clustalo_installed, version, path = check_clustalo_installation()
         if not clustalo_installed:
+            hint = get_platform_tool_install_hint('clustalo')
             self.warning_label.setText(
-                "⚠️ Clustal Omega not found in WSL. Please install it to use alignment.\n"
-                "Installation: sudo apt install clustalo"
+                f"⚠️ Clustal Omega not found. Please install it to use alignment.\n{hint}"
             )
             self.warning_label.show()
             self.run_button.setEnabled(False)

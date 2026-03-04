@@ -10,7 +10,7 @@ from core.mmseqs_runner import MMseqsWorker
 from core.db_definitions import NCBI_DATABASES
 from core.db_conversion_manager import DatabaseConversionManager
 from core.db_conversion_worker import DatabaseConversionWorker
-from core.wsl_utils import is_wsl_available, check_mmseqs_installation, check_blastdbcmd_installation
+from core.wsl_utils import is_wsl_available, check_mmseqs_installation, check_blastdbcmd_installation, get_platform_tool_install_hint
 from ui.dialogs.conversion_progress_dialog import ConversionProgressDialog
 from ui.dialogs.protein_search_dialog import ProteinSearchDialog
 from ui.dialogs.cluster_selection_dialog import ClusterSelectionDialog
@@ -31,7 +31,7 @@ class MMseqsPage(QWidget):
         self.mmseqs_worker = None
         self.conversion_manager = DatabaseConversionManager()
         self.conversion_dialogs = {}  # Track active conversion dialogs
-        self.blast_db_dir = "E:\\Projects\\Protein-GUI\\blast_databases"
+        self.blast_db_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "blast_databases")
         self.installed_databases = set()  # Track which databases are installed
         self.custom_blast_db_path = None  # For user-selected BLAST database
         self.search_start_time = None
@@ -45,7 +45,7 @@ class MMseqsPage(QWidget):
         self.current_sequence_metadata = {}
         self.init_ui()
         
-        # Check WSL/MMseqs2 availability on startup
+        # Check tool availability on startup
         QTimer.singleShot(500, self.check_system_requirements)
         # Scan for installed BLAST databases
         QTimer.singleShot(100, self.scan_installed_databases)
@@ -343,7 +343,7 @@ class MMseqsPage(QWidget):
         sensitivity_layout.addStretch()
         
         # Info label
-        self.info_label = QLabel("ℹ️ MMseqs2 uses WSL Ubuntu. First-time database selection will trigger auto-conversion.")
+        self.info_label = QLabel("ℹ️ First-time database selection will trigger auto-conversion to MMseqs2 format.")
         self.info_label.setWordWrap(True)
         self.info_label.setStyleSheet("color: #5d6d7e; font-style: italic; padding: 5px; background-color: #e8f4f8; border-radius: 3px; margin-top: 5px;")
         
@@ -900,11 +900,11 @@ class MMseqsPage(QWidget):
                 widget.setVisible(is_custom_mmseqs)
     
     def check_system_requirements(self):
-        """Check if WSL and MMseqs2 are available"""
+        """Check if required tools are available"""
         if not is_wsl_available():
             self.info_label.setText(
-                "⚠️ WSL not detected. MMseqs2 requires Windows Subsystem for Linux.\n"
-                "Please use BLAST search or install WSL to use MMseqs2."
+                "⚠️ Command execution environment not available.\n"
+                "Please check your system setup to use MMseqs2."
             )
             self.info_label.setStyleSheet(
                 "color: #856404; font-style: italic; padding: 5px; "
@@ -912,12 +912,11 @@ class MMseqsPage(QWidget):
             )
             return
         
-        # Check MMseqs2
         mmseqs_installed, mmseqs_version, mmseqs_path = check_mmseqs_installation()
         if not mmseqs_installed:
+            hint = get_platform_tool_install_hint('mmseqs')
             self.info_label.setText(
-                "⚠️ MMseqs2 not found in WSL. Please install MMseqs2 or use BLAST search.\n"
-                "Installation: wget https://mmseqs.com/latest/mmseqs-linux-avx2.tar.gz"
+                f"⚠️ MMseqs2 not found. Please install MMseqs2 or use BLAST search.\n{hint}"
             )
             self.info_label.setStyleSheet(
                 "color: #856404; font-style: italic; padding: 5px; "
@@ -925,12 +924,11 @@ class MMseqsPage(QWidget):
             )
             return
         
-        # Check blastdbcmd
         blast_installed, blast_version, blast_path = check_blastdbcmd_installation()
         if not blast_installed:
+            hint = get_platform_tool_install_hint('blastdbcmd')
             self.info_label.setText(
-                "⚠️ blastdbcmd not found in WSL. Required for database conversion.\n"
-                "Installation: sudo apt install ncbi-blast+"
+                f"⚠️ blastdbcmd not found. Required for database conversion.\n{hint}"
             )
             self.info_label.setStyleSheet(
                 "color: #856404; font-style: italic; padding: 5px; "
@@ -1026,7 +1024,7 @@ class MMseqsPage(QWidget):
             return
         
         # Output directory for MMseqs2 databases
-        mmseqs_db_dir = "E:\\Projects\\Protein-GUI\\mmseqs_databases"
+        mmseqs_db_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "mmseqs_databases")
         os.makedirs(mmseqs_db_dir, exist_ok=True)
         
         # Mark as converting
