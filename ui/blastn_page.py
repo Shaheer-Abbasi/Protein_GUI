@@ -1,13 +1,18 @@
 """BLASTN (Nucleotide BLAST) page for nucleotide sequence searches"""
 import os
 import time
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel, 
-                             QComboBox, QHBoxLayout, QCheckBox, QLineEdit, QFileDialog, 
-                             QGroupBox, QRadioButton, QButtonGroup, QMessageBox, QFrame, QDialog,
-                             QSpinBox, QDoubleSpinBox)
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QTextEdit, QPushButton, QLabel,
+    QComboBox, QHBoxLayout, QCheckBox, QLineEdit, QFileDialog,
+    QGroupBox, QRadioButton, QButtonGroup, QMessageBox, QFrame, QDialog,
+    QSpinBox, QDoubleSpinBox, QScrollArea, QSplitter, QSizePolicy
+)
 from PyQt5.QtCore import pyqtSignal, Qt
 from PyQt5.QtGui import QFont
 
+from ui.theme import get_theme
+from ui.icons import feather_icon, set_button_icon
+from ui.widgets.results_panel import SearchResultsPanel
 from core.db_definitions import NUCLEOTIDE_DATABASES
 from core.blastn_worker import BLASTNWorker
 from core.config_manager import get_config
@@ -17,18 +22,16 @@ from ui.dialogs.nucleotide_search_dialog import NucleotideSearchDialog
 
 
 def validate_nucleotide_sequence(sequence):
-    """Validate that sequence contains only valid nucleotide characters"""
-    valid_chars = set('ATGCUNRYSWKMBDHV')  # IUPAC nucleotide codes
+    valid_chars = set('ATGCUNRYSWKMBDHV')
     sequence_upper = sequence.upper()
     invalid_chars = set(sequence_upper) - valid_chars
     return len(invalid_chars) == 0, invalid_chars
 
 
 class BLASTNPage(QWidget):
-    """BLASTN (Nucleotide BLAST) analysis page widget"""
     back_requested = pyqtSignal()
-    navigate_to_alignment = pyqtSignal(str)  # fasta_path for alignment
-    
+    navigate_to_alignment = pyqtSignal(str)
+
     def __init__(self):
         super().__init__()
         self.blast_worker = None
@@ -40,655 +43,300 @@ class BLASTNPage(QWidget):
         self.exporter = ResultsExporter()
         self.loaded_sequences = []
         self.current_sequence_metadata = {}
-        self.init_ui()
-    
-    def init_ui(self):
-        """Initialize the BLASTN page UI"""
-        layout = QVBoxLayout()
-        layout.setContentsMargins(20, 20, 20, 20)
-        
-        # Page header
-        header_layout = QHBoxLayout()
-        
-        back_button = QPushButton("← Back to Home")
-        back_button.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
-        back_button.clicked.connect(self.back_requested.emit)
-        
-        page_title = QLabel("🧬 BLASTN Nucleotide Search")
-        title_font = QFont()
-        title_font.setPointSize(18)
-        title_font.setBold(True)
-        page_title.setFont(title_font)
-        page_title.setStyleSheet("color: #1e8449;")
-        
-        header_layout.addWidget(back_button)
-        header_layout.addStretch()
-        header_layout.addWidget(page_title)
-        header_layout.addStretch()
-        
-        # Input Method Selection Group
-        input_method_group = QGroupBox("Sequence Input Method")
-        input_method_layout = QVBoxLayout()
-        
-        # Radio buttons for input method
-        method_buttons_layout = QHBoxLayout()
+        self._init_ui()
+
+    def _init_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        splitter = QSplitter(Qt.Vertical)
+
+        # ── Top: input controls in a scroll area ─────────────────
+        input_scroll = QScrollArea()
+        input_scroll.setWidgetResizable(True)
+        input_scroll.setFrameShape(QFrame.NoFrame)
+
+        input_widget = QWidget()
+        form = QVBoxLayout(input_widget)
+        form.setContentsMargins(28, 24, 28, 16)
+        form.setSpacing(16)
+
+        title = QLabel("BLASTN Nucleotide Search")
+        title.setProperty("class", "title")
+        form.addWidget(title)
+
+        # ── Input method ────────────────────────────────────────
+        input_group = QGroupBox("Sequence Input")
+        ig_layout = QVBoxLayout()
+
+        method_row = QHBoxLayout()
         self.input_method_group = QButtonGroup()
-        
         self.paste_radio = QRadioButton("Paste Sequence")
         self.upload_radio = QRadioButton("Upload FASTA File")
         self.search_radio = QRadioButton("Search NCBI Database")
-        
         self.paste_radio.setChecked(True)
-        
         self.input_method_group.addButton(self.paste_radio, 1)
         self.input_method_group.addButton(self.upload_radio, 2)
         self.input_method_group.addButton(self.search_radio, 3)
-        
-        radio_style = """
-            QRadioButton {
-                font-size: 12px;
-                font-weight: bold;
-                padding: 5px;
-            }
-            QRadioButton::indicator {
-                width: 15px;
-                height: 15px;
-            }
-        """
-        self.paste_radio.setStyleSheet(radio_style)
-        self.upload_radio.setStyleSheet(radio_style)
-        self.search_radio.setStyleSheet(radio_style)
-        
-        self.paste_radio.toggled.connect(self._on_input_method_changed)
-        self.upload_radio.toggled.connect(self._on_input_method_changed)
-        self.search_radio.toggled.connect(self._on_input_method_changed)
-        
-        method_buttons_layout.addWidget(self.paste_radio)
-        method_buttons_layout.addWidget(self.upload_radio)
-        method_buttons_layout.addWidget(self.search_radio)
-        method_buttons_layout.addStretch()
-        
-        input_method_layout.addLayout(method_buttons_layout)
-        
-        # Container for different input widgets
-        self.input_container = QFrame()
-        self.input_container_layout = QVBoxLayout()
-        self.input_container_layout.setContentsMargins(0, 10, 0, 0)
-        
-        # --- Paste Input Section ---
+        for r in (self.paste_radio, self.upload_radio, self.search_radio):
+            method_row.addWidget(r)
+            r.toggled.connect(self._on_input_method_changed)
+        method_row.addStretch()
+        ig_layout.addLayout(method_row)
+
+        # Paste widget
         self.paste_widget = QWidget()
-        paste_layout = QVBoxLayout()
-        paste_layout.setContentsMargins(0, 0, 0, 0)
-        
-        self.input_label = QLabel("Enter nucleotide sequence:")
+        pw = QVBoxLayout(self.paste_widget)
+        pw.setContentsMargins(0, 0, 0, 0)
         self.input_text = QTextEdit()
         self.input_text.setPlaceholderText("Paste your nucleotide sequence here (A, T, G, C, N)...")
-        self.input_text.setMaximumHeight(100)
+        self.input_text.setMinimumHeight(60)
         self.input_text.textChanged.connect(self._update_sequence_counter)
-        
         self.sequence_counter = QLabel("0 nucleotides")
-        self.sequence_counter.setStyleSheet("color: #7f8c8d; font-size: 10px;")
-        
-        paste_layout.addWidget(self.input_label)
-        paste_layout.addWidget(self.input_text)
-        paste_layout.addWidget(self.sequence_counter)
-        self.paste_widget.setLayout(paste_layout)
-        
-        # --- Upload FASTA Section ---
+        self.sequence_counter.setProperty("class", "muted")
+        pw.addWidget(self.input_text)
+        pw.addWidget(self.sequence_counter)
+
+        # Upload widget
         self.upload_widget = QWidget()
-        upload_layout = QVBoxLayout()
-        upload_layout.setContentsMargins(0, 0, 0, 0)
-        
-        upload_button_layout = QHBoxLayout()
-        self.upload_fasta_button = QPushButton("📁 Choose FASTA File")
+        uw = QVBoxLayout(self.upload_widget)
+        uw.setContentsMargins(0, 0, 0, 0)
+        ub_row = QHBoxLayout()
+        self.upload_fasta_button = QPushButton("Choose FASTA File")
+        set_button_icon(self.upload_fasta_button, "folder", 14, "#FFFFFF")
         self.upload_fasta_button.clicked.connect(self._upload_fasta_file)
-        self.upload_fasta_button.setStyleSheet("""
-            QPushButton {
-                background-color: #1e8449;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 10px 20px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #196f3d;
-            }
-        """)
-        
         self.fasta_file_label = QLabel("No file selected")
-        self.fasta_file_label.setStyleSheet("color: #7f8c8d; font-style: italic;")
-        
-        upload_button_layout.addWidget(self.upload_fasta_button)
-        upload_button_layout.addWidget(self.fasta_file_label)
-        upload_button_layout.addStretch()
-        
-        # Sequence selector for multi-FASTA
+        self.fasta_file_label.setProperty("class", "muted")
+        ub_row.addWidget(self.upload_fasta_button)
+        ub_row.addWidget(self.fasta_file_label)
+        ub_row.addStretch()
         self.fasta_sequence_selector = QComboBox()
         self.fasta_sequence_selector.setVisible(False)
         self.fasta_sequence_selector.currentIndexChanged.connect(self._on_fasta_sequence_selected)
-        
-        upload_layout.addLayout(upload_button_layout)
-        upload_layout.addWidget(self.fasta_sequence_selector)
-        upload_layout.addWidget(QLabel("FASTA format: Header line starts with '>', followed by sequence lines"))
-        self.upload_widget.setLayout(upload_layout)
+        uw.addLayout(ub_row)
+        uw.addWidget(self.fasta_sequence_selector)
         self.upload_widget.setVisible(False)
-        
-        # --- Search Database Section ---
+
+        # Search widget
         self.search_widget = QWidget()
-        search_layout = QVBoxLayout()
-        search_layout.setContentsMargins(0, 0, 0, 0)
-        
-        search_button_layout = QHBoxLayout()
-        self.search_db_button = QPushButton("🔍 Search NCBI GenBank")
+        sw = QVBoxLayout(self.search_widget)
+        sw.setContentsMargins(0, 0, 0, 0)
+        sb_row = QHBoxLayout()
+        self.search_db_button = QPushButton("Search NCBI GenBank")
+        set_button_icon(self.search_db_button, "search", 14, "#FFFFFF")
         self.search_db_button.clicked.connect(self._open_nucleotide_search)
-        self.search_db_button.setStyleSheet("""
-            QPushButton {
-                background-color: #1e8449;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 10px 20px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #196f3d;
-            }
-        """)
-        
         self.search_info_label = QLabel("Search GenBank by gene name, accession, or keywords")
-        self.search_info_label.setStyleSheet("color: #7f8c8d; font-style: italic;")
-        
-        search_button_layout.addWidget(self.search_db_button)
-        search_button_layout.addWidget(self.search_info_label)
-        search_button_layout.addStretch()
-        
-        search_layout.addLayout(search_button_layout)
-        self.search_widget.setLayout(search_layout)
+        self.search_info_label.setProperty("class", "muted")
+        sb_row.addWidget(self.search_db_button)
+        sb_row.addWidget(self.search_info_label)
+        sb_row.addStretch()
+        sw.addLayout(sb_row)
         self.search_widget.setVisible(False)
-        
-        # Add all input widgets to container
-        self.input_container_layout.addWidget(self.paste_widget)
-        self.input_container_layout.addWidget(self.upload_widget)
-        self.input_container_layout.addWidget(self.search_widget)
-        self.input_container.setLayout(self.input_container_layout)
-        
-        input_method_layout.addWidget(self.input_container)
-        input_method_group.setLayout(input_method_layout)
-        
-        # Database selection group
+
+        ig_layout.addWidget(self.paste_widget)
+        ig_layout.addWidget(self.upload_widget)
+        ig_layout.addWidget(self.search_widget)
+        input_group.setLayout(ig_layout)
+        form.addWidget(input_group)
+
+        # ── Database options ────────────────────────────────────
         db_group = QGroupBox("Database Options")
-        db_group_layout = QVBoxLayout()
-        
-        # Remote vs Local database selection
-        source_layout = QHBoxLayout()
+        dg = QVBoxLayout()
+
+        src_row = QHBoxLayout()
         self.remote_radio = QCheckBox("Use Remote NCBI Database")
         self.remote_radio.setChecked(True)
         self.remote_radio.toggled.connect(self.on_database_source_changed)
-        source_layout.addWidget(self.remote_radio)
-        
-        # Database selection
-        db_layout = QVBoxLayout()
-        db_header_layout = QHBoxLayout()
-        db_label = QLabel("Database:")
-        db_info_label = QLabel("Nucleotide databases for BLASTN search")
-        db_info_label.setStyleSheet("color: #7f8c8d; font-size: 10px;")
-        
-        db_header_layout.addWidget(db_label)
-        db_header_layout.addStretch()
-        db_header_layout.addWidget(db_info_label)
-        
-        # Create database selection combobox
+        src_row.addWidget(self.remote_radio)
+
+        db_sel = QVBoxLayout()
         self.db_combo = QComboBox()
-        
-        # Add key nucleotide databases first
-        key_databases = ['nt', 'refseq_rna', 'refseq_genomic', 'est', '16S_ribosomal_RNA']
-        for db in key_databases:
+        key_dbs = ['nt', 'refseq_rna', 'refseq_genomic', 'est', '16S_ribosomal_RNA']
+        for db in key_dbs:
             if db in NUCLEOTIDE_DATABASES:
                 self.db_combo.addItem(f"{db} - {NUCLEOTIDE_DATABASES[db]}")
-        
-        # Add remaining databases
         for db, desc in NUCLEOTIDE_DATABASES.items():
-            if db not in key_databases:
+            if db not in key_dbs:
                 self.db_combo.addItem(f"{db} - {desc}")
-        
         self.db_combo.setCurrentIndex(0)
-        self.db_combo.setMinimumHeight(30)
-        self.db_combo.setToolTip("Select from available NCBI nucleotide databases")
         self.db_combo.currentTextChanged.connect(self.on_database_changed)
-        
-        # Database description label
+
         self.db_description = QLabel()
         self.db_description.setWordWrap(True)
-        self.db_description.setStyleSheet("color: #5d6d7e; font-style: italic; padding: 5px; background-color: #e8f6f3; border-radius: 3px; margin-top: 5px;")
+        self.db_description.setProperty("class", "muted")
         self.update_database_description()
-        
-        # Popular databases quick access
-        popular_layout = QHBoxLayout()
-        popular_label = QLabel("Popular:")
-        popular_label.setStyleSheet("color: #7f8c8d; font-size: 10px;")
-        
-        popular_buttons = []
-        for db_name in ['nt', 'refseq_rna', 'refseq_genomic', '16S_ribosomal_RNA']:
-            btn = QPushButton(db_name)
-            btn.setMaximumHeight(25)
-            btn.setStyleSheet("""
-                QPushButton {
-                    background-color: #e8f6f3;
-                    border: 1px solid #1e8449;
-                    border-radius: 3px;
-                    padding: 2px 8px;
-                    font-size: 10px;
-                    color: #1e8449;
-                }
-                QPushButton:hover {
-                    background-color: #1e8449;
-                    color: white;
-                }
-            """)
-            btn.clicked.connect(lambda checked, db=db_name: self.db_combo.setCurrentText(db))
-            popular_buttons.append(btn)
-        
-        popular_layout.addWidget(popular_label)
-        for btn in popular_buttons:
-            popular_layout.addWidget(btn)
-        popular_layout.addStretch()
-        
-        db_layout.addLayout(db_header_layout)
-        db_layout.addWidget(self.db_combo)
-        db_layout.addWidget(self.db_description)
-        db_layout.addLayout(popular_layout)
-        
-        # Local database path
-        local_db_layout = QHBoxLayout()
+
+        db_sel.addWidget(self.db_combo)
+        db_sel.addWidget(self.db_description)
+
+        local_row = QHBoxLayout()
         self.local_db_label = QLabel("Local DB Path:")
         self.local_db_path = QLineEdit()
         self.local_db_path.setPlaceholderText("Path to local database directory (optional)")
-        self.browse_button = QPushButton("Browse...")
+        self.browse_button = QPushButton("Browse")
+        self.browse_button.setProperty("class", "secondary")
+        set_button_icon(self.browse_button, "folder", 14)
         self.browse_button.clicked.connect(self.browse_database_path)
-        
-        local_db_layout.addWidget(self.local_db_label)
-        local_db_layout.addWidget(self.local_db_path)
-        local_db_layout.addWidget(self.browse_button)
-        
-        db_group_layout.addLayout(source_layout)
-        db_group_layout.addLayout(db_layout)
-        db_group_layout.addLayout(local_db_layout)
-        db_group.setLayout(db_group_layout)
-        
+        local_row.addWidget(self.local_db_label)
+        local_row.addWidget(self.local_db_path)
+        local_row.addWidget(self.browse_button)
+
+        dg.addLayout(src_row)
+        dg.addLayout(db_sel)
+        dg.addLayout(local_row)
+        db_group.setLayout(dg)
         self.on_database_source_changed()
-        
-        # Advanced Settings Group
-        advanced_group = QGroupBox("Advanced Settings")
-        advanced_group_layout = QVBoxLayout()
-        
+        form.addWidget(db_group)
+
+        # ── Advanced settings ───────────────────────────────────
+        adv_group = QGroupBox("Advanced Settings")
+        ag = QVBoxLayout()
+
         self.show_advanced_checkbox = QCheckBox("Show Advanced Options")
-        self.show_advanced_checkbox.setStyleSheet("font-weight: bold;")
         self.show_advanced_checkbox.stateChanged.connect(self._toggle_advanced_options)
-        
+
         self.advanced_options_widget = QWidget()
-        advanced_options_layout = QVBoxLayout()
-        advanced_options_layout.setContentsMargins(0, 10, 0, 0)
-        
-        # Row 1: Task and E-value
-        row1_layout = QHBoxLayout()
-        
-        # BLAST task (algorithm)
-        task_label = QLabel("Algorithm:")
-        task_label.setMinimumWidth(100)
+        ao = QVBoxLayout(self.advanced_options_widget)
+        ao.setContentsMargins(0, 8, 0, 0)
+
+        r1 = QHBoxLayout()
+        r1.addWidget(QLabel("Algorithm:"))
         self.task_combo = QComboBox()
         self.task_combo.addItems([
-            "blastn (standard)",
-            "blastn-short (short sequences)",
-            "megablast (highly similar)",
-            "dc-megablast (discontinuous)"
+            "blastn (standard)", "blastn-short (short sequences)",
+            "megablast (highly similar)", "dc-megablast (discontinuous)"
         ])
-        self.task_combo.setToolTip("BLAST algorithm variant to use")
         self.task_combo.currentIndexChanged.connect(self._update_word_size)
-        
-        # E-value threshold
-        evalue_label = QLabel("E-value:")
-        evalue_label.setMinimumWidth(60)
+        r1.addWidget(self.task_combo)
+        r1.addSpacing(16)
+        r1.addWidget(QLabel("E-value Threshold:"))
         self.evalue_input = QDoubleSpinBox()
         self.evalue_input.setRange(1e-200, 1000)
         self.evalue_input.setDecimals(0)
         self.evalue_input.setValue(10)
-        self.evalue_input.setToolTip("Expect value threshold for reporting matches")
-        
-        row1_layout.addWidget(task_label)
-        row1_layout.addWidget(self.task_combo)
-        row1_layout.addSpacing(20)
-        row1_layout.addWidget(evalue_label)
-        row1_layout.addWidget(self.evalue_input)
-        row1_layout.addStretch()
-        
-        # Row 2: Max hits and Word size
-        row2_layout = QHBoxLayout()
-        
-        max_targets_label = QLabel("Max Hits:")
-        max_targets_label.setMinimumWidth(100)
+        r1.addWidget(self.evalue_input)
+        r1.addStretch()
+        ao.addLayout(r1)
+
+        r2 = QHBoxLayout()
+        r2.addWidget(QLabel("Max Hits:"))
         self.max_targets_input = QSpinBox()
         self.max_targets_input.setRange(1, 5000)
         self.max_targets_input.setValue(100)
-        self.max_targets_input.setToolTip("Maximum number of aligned sequences to keep")
-        
-        word_size_label = QLabel("Word Size:")
-        word_size_label.setMinimumWidth(80)
+        r2.addWidget(self.max_targets_input)
+        r2.addSpacing(16)
+        r2.addWidget(QLabel("Word Size:"))
         self.word_size_input = QSpinBox()
         self.word_size_input.setRange(4, 64)
         self.word_size_input.setValue(11)
-        self.word_size_input.setToolTip("Length of initial exact match (varies by algorithm)")
-        
-        row2_layout.addWidget(max_targets_label)
-        row2_layout.addWidget(self.max_targets_input)
-        row2_layout.addSpacing(20)
-        row2_layout.addWidget(word_size_label)
-        row2_layout.addWidget(self.word_size_input)
-        row2_layout.addStretch()
-        
-        # Row 3: Match/Mismatch scores
-        row3_layout = QHBoxLayout()
-        
-        reward_label = QLabel("Match Reward:")
-        reward_label.setMinimumWidth(100)
+        r2.addWidget(self.word_size_input)
+        r2.addStretch()
+        ao.addLayout(r2)
+
+        r3 = QHBoxLayout()
+        r3.addWidget(QLabel("Match Reward:"))
         self.reward_input = QSpinBox()
         self.reward_input.setRange(1, 10)
         self.reward_input.setValue(2)
-        self.reward_input.setToolTip("Reward for a nucleotide match")
-        
-        penalty_label = QLabel("Mismatch Penalty:")
-        penalty_label.setMinimumWidth(110)
+        r3.addWidget(self.reward_input)
+        r3.addSpacing(16)
+        r3.addWidget(QLabel("Mismatch Penalty:"))
         self.penalty_input = QSpinBox()
         self.penalty_input.setRange(-10, -1)
         self.penalty_input.setValue(-3)
-        self.penalty_input.setToolTip("Penalty for a nucleotide mismatch (negative value)")
-        
-        row3_layout.addWidget(reward_label)
-        row3_layout.addWidget(self.reward_input)
-        row3_layout.addSpacing(20)
-        row3_layout.addWidget(penalty_label)
-        row3_layout.addWidget(self.penalty_input)
-        row3_layout.addStretch()
-        
-        # Row 4: Gap costs
-        row4_layout = QHBoxLayout()
-        
-        gap_open_label = QLabel("Gap Open Cost:")
-        gap_open_label.setMinimumWidth(100)
+        r3.addWidget(self.penalty_input)
+        r3.addStretch()
+        ao.addLayout(r3)
+
+        r4 = QHBoxLayout()
+        r4.addWidget(QLabel("Gap Open Cost:"))
         self.gap_open_input = QSpinBox()
         self.gap_open_input.setRange(1, 50)
         self.gap_open_input.setValue(5)
-        self.gap_open_input.setToolTip("Cost to open a gap")
-        
-        gap_extend_label = QLabel("Gap Extend:")
-        gap_extend_label.setMinimumWidth(80)
+        r4.addWidget(self.gap_open_input)
+        r4.addSpacing(16)
+        r4.addWidget(QLabel("Gap Extend:"))
         self.gap_extend_input = QSpinBox()
         self.gap_extend_input.setRange(1, 10)
         self.gap_extend_input.setValue(2)
-        self.gap_extend_input.setToolTip("Cost to extend a gap")
-        
-        row4_layout.addWidget(gap_open_label)
-        row4_layout.addWidget(self.gap_open_input)
-        row4_layout.addSpacing(20)
-        row4_layout.addWidget(gap_extend_label)
-        row4_layout.addWidget(self.gap_extend_input)
-        row4_layout.addStretch()
-        
-        # Row 5: Filters
-        row5_layout = QHBoxLayout()
-        
+        r4.addWidget(self.gap_extend_input)
+        r4.addStretch()
+        ao.addLayout(r4)
+
+        r5 = QHBoxLayout()
         self.dust_checkbox = QCheckBox("Filter Low Complexity (DUST)")
         self.dust_checkbox.setChecked(True)
-        self.dust_checkbox.setToolTip("Mask low-complexity regions in query sequence")
-        
         self.soft_masking_checkbox = QCheckBox("Soft Masking")
-        self.soft_masking_checkbox.setChecked(False)
-        self.soft_masking_checkbox.setToolTip("Use soft masking instead of hard masking")
-        
-        row5_layout.addWidget(self.dust_checkbox)
-        row5_layout.addSpacing(20)
-        row5_layout.addWidget(self.soft_masking_checkbox)
-        row5_layout.addStretch()
-        
-        advanced_options_layout.addLayout(row1_layout)
-        advanced_options_layout.addLayout(row2_layout)
-        advanced_options_layout.addLayout(row3_layout)
-        advanced_options_layout.addLayout(row4_layout)
-        advanced_options_layout.addLayout(row5_layout)
-        
-        self.advanced_options_widget.setLayout(advanced_options_layout)
+        r5.addWidget(self.dust_checkbox)
+        r5.addSpacing(16)
+        r5.addWidget(self.soft_masking_checkbox)
+        r5.addStretch()
+        ao.addLayout(r5)
+
         self.advanced_options_widget.hide()
-        
-        advanced_group_layout.addWidget(self.show_advanced_checkbox)
-        advanced_group_layout.addWidget(self.advanced_options_widget)
-        advanced_group.setLayout(advanced_group_layout)
-        
-        # Button layout
-        button_layout = QHBoxLayout()
-        
-        # Run button
+        ag.addWidget(self.show_advanced_checkbox)
+        ag.addWidget(self.advanced_options_widget)
+        adv_group.setLayout(ag)
+        form.addWidget(adv_group)
+
+        # Run / Cancel buttons + status
+        btn_row = QHBoxLayout()
         self.process_button = QPushButton("Run BLASTN Search")
-        self.process_button.setStyleSheet("""
-            QPushButton {
-                background-color: #1e8449;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 10px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #196f3d;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
+        self.process_button.setProperty("class", "success")
+        set_button_icon(self.process_button, "play", 16, "#FFFFFF")
+        self.process_button.setMinimumHeight(40)
         self.process_button.clicked.connect(self.run_blast)
-        
-        # Cancel button
+
         self.cancel_button = QPushButton("Cancel Search")
-        self.cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 10px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #c0392b;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
+        self.cancel_button.setProperty("class", "danger")
+        set_button_icon(self.cancel_button, "x", 14, "#FFFFFF")
+        self.cancel_button.setMinimumHeight(40)
         self.cancel_button.clicked.connect(self._cancel_search)
         self.cancel_button.setEnabled(False)
         self.cancel_button.hide()
-        
-        button_layout.addWidget(self.process_button)
-        button_layout.addWidget(self.cancel_button)
-        button_layout.addStretch()
-        
+
+        btn_row.addWidget(self.process_button)
+        btn_row.addWidget(self.cancel_button)
+        btn_row.addStretch()
+        form.addLayout(btn_row)
+
         self.status_label = QLabel("Ready")
-        self.status_label.setStyleSheet("color: #7f8c8d; font-weight: bold;")
-        
-        # Summary statistics panel
-        self.summary_panel = QWidget()
-        summary_layout = QHBoxLayout()
-        summary_layout.setContentsMargins(0, 10, 0, 10)
-        
-        self.summary_panel.setStyleSheet("""
-            QWidget {
-                background-color: #e8f6f3;
-                border-radius: 8px;
-                padding: 10px;
-            }
-            QLabel {
-                background-color: transparent;
-            }
-        """)
-        
-        self.stat_hits = QLabel("—")
-        self.stat_best_eval = QLabel("—")
-        self.stat_avg_identity = QLabel("—")
-        self.stat_search_time = QLabel("—")
-        
-        for stat_label in [self.stat_hits, self.stat_best_eval, self.stat_avg_identity, self.stat_search_time]:
-            stat_label.setAlignment(Qt.AlignCenter)
-            stat_label.setStyleSheet("font-size: 18px; font-weight: bold; color: #1e8449;")
-        
-        hits_box = QVBoxLayout()
-        hits_label = QLabel("Total Hits")
-        hits_label.setAlignment(Qt.AlignCenter)
-        hits_label.setStyleSheet("font-size: 11px; color: #7f8c8d;")
-        hits_box.addWidget(self.stat_hits)
-        hits_box.addWidget(hits_label)
-        
-        eval_box = QVBoxLayout()
-        eval_label = QLabel("Best E-value")
-        eval_label.setAlignment(Qt.AlignCenter)
-        eval_label.setStyleSheet("font-size: 11px; color: #7f8c8d;")
-        eval_box.addWidget(self.stat_best_eval)
-        eval_box.addWidget(eval_label)
-        
-        identity_box = QVBoxLayout()
-        identity_label = QLabel("Avg Identity")
-        identity_label.setAlignment(Qt.AlignCenter)
-        identity_label.setStyleSheet("font-size: 11px; color: #7f8c8d;")
-        identity_box.addWidget(self.stat_avg_identity)
-        identity_box.addWidget(identity_label)
-        
-        time_box = QVBoxLayout()
-        time_label = QLabel("Search Time")
-        time_label.setAlignment(Qt.AlignCenter)
-        time_label.setStyleSheet("font-size: 11px; color: #7f8c8d;")
-        time_box.addWidget(self.stat_search_time)
-        time_box.addWidget(time_label)
-        
-        summary_layout.addLayout(hits_box)
-        summary_layout.addSpacing(20)
-        summary_layout.addLayout(eval_box)
-        summary_layout.addSpacing(20)
-        summary_layout.addLayout(identity_box)
-        summary_layout.addSpacing(20)
-        summary_layout.addLayout(time_box)
-        
-        self.summary_panel.setLayout(summary_layout)
-        self.summary_panel.hide()
-        
-        # Results section with export buttons
-        results_header_layout = QHBoxLayout()
-        self.output_label = QLabel("Results:")
-        results_header_layout.addWidget(self.output_label)
-        results_header_layout.addStretch()
-        
-        # Export buttons
-        self.export_tsv_button = QPushButton("📥 Export as TSV")
-        self.export_csv_button = QPushButton("📥 Export as CSV")
-        
-        self.export_tsv_button.setEnabled(False)
-        self.export_csv_button.setEnabled(False)
-        
-        export_button_style = """
-            QPushButton {
-                background-color: #1e8449;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 5px 10px;
-                font-size: 11px;
-            }
-            QPushButton:hover {
-                background-color: #196f3d;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """
-        self.export_tsv_button.setStyleSheet(export_button_style)
-        self.export_csv_button.setStyleSheet(export_button_style)
-        
-        self.export_tsv_button.clicked.connect(lambda: self._export_results('tsv'))
-        self.export_csv_button.clicked.connect(lambda: self._export_results('csv'))
-        
-        results_header_layout.addWidget(self.export_tsv_button)
-        results_header_layout.addWidget(self.export_csv_button)
-        
-        self.output_text = QTextEdit()
-        self.output_text.setReadOnly(True)
-        self.output_text.setAcceptRichText(True)
-        
-        # Add widgets to layout
-        layout.addLayout(header_layout)
-        layout.addWidget(input_method_group)
-        layout.addWidget(db_group)
-        layout.addWidget(advanced_group)
-        layout.addLayout(button_layout)
-        layout.addWidget(self.status_label)
-        layout.addWidget(self.summary_panel)
-        layout.addLayout(results_header_layout)
-        layout.addWidget(self.output_text)
-        
-        self.setLayout(layout)
-    
+        self.status_label.setProperty("class", "muted")
+        form.addWidget(self.status_label)
+
+        input_scroll.setWidget(input_widget)
+        splitter.addWidget(input_scroll)
+
+        # ── Bottom: results panel ────────────────────────────────
+        self.results_panel = SearchResultsPanel(show_align_button=False)
+        self.results_panel.export_requested.connect(self._export_results)
+        splitter.addWidget(self.results_panel)
+
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([320, 500])
+
+        root.addWidget(splitter)
+
+    # ── Input method switching ────────────────────────────────────
+
     def _on_input_method_changed(self):
-        """Handle input method radio button changes"""
-        if self.paste_radio.isChecked():
-            self.paste_widget.setVisible(True)
-            self.upload_widget.setVisible(False)
-            self.search_widget.setVisible(False)
-        elif self.upload_radio.isChecked():
-            self.paste_widget.setVisible(False)
-            self.upload_widget.setVisible(True)
-            self.search_widget.setVisible(False)
-        elif self.search_radio.isChecked():
-            self.paste_widget.setVisible(False)
-            self.upload_widget.setVisible(False)
-            self.search_widget.setVisible(True)
-    
+        self.paste_widget.setVisible(self.paste_radio.isChecked())
+        self.upload_widget.setVisible(self.upload_radio.isChecked())
+        self.search_widget.setVisible(self.search_radio.isChecked())
+
     def _toggle_advanced_options(self, state):
-        """Show/hide advanced options"""
         self.advanced_options_widget.setVisible(state == Qt.Checked)
-    
+
     def _update_word_size(self):
-        """Update word size based on selected task/algorithm"""
-        # Default word sizes for each algorithm
-        word_sizes = {
-            0: 11,   # blastn
-            1: 7,    # blastn-short
-            2: 28,   # megablast
-            3: 11,   # dc-megablast
-        }
-        task_idx = self.task_combo.currentIndex()
-        if task_idx in word_sizes:
-            self.word_size_input.setValue(word_sizes[task_idx])
-    
+        word_sizes = {0: 11, 1: 7, 2: 28, 3: 11}
+        idx = self.task_combo.currentIndex()
+        if idx in word_sizes:
+            self.word_size_input.setValue(word_sizes[idx])
+
     def _get_advanced_params(self):
-        """Get advanced parameters as a dictionary"""
-        task_map = {
-            0: "blastn",
-            1: "blastn-short",
-            2: "megablast",
-            3: "dc-megablast"
-        }
-        
+        task_map = {0: "blastn", 1: "blastn-short", 2: "megablast", 3: "dc-megablast"}
         return {
             'task': task_map.get(self.task_combo.currentIndex(), "blastn"),
             'evalue': self.evalue_input.value(),
@@ -701,347 +349,198 @@ class BLASTNPage(QWidget):
             'dust': 'yes' if self.dust_checkbox.isChecked() else 'no',
             'soft_masking': self.soft_masking_checkbox.isChecked()
         }
-    
+
     def _update_sequence_counter(self):
-        """Update the nucleotide counter for pasted sequence"""
         text = self.input_text.toPlainText().strip().upper()
-        clean_text = ''.join(c for c in text if c.isalpha())
-        
-        count = len(clean_text)
+        count = len(''.join(c for c in text if c.isalpha()))
         self.sequence_counter.setText(f"{count} nucleotides")
-        
+        t = get_theme()
         if count == 0:
-            self.sequence_counter.setStyleSheet("color: #7f8c8d; font-size: 10px;")
+            self.sequence_counter.setStyleSheet(f"color:{t.get('text_muted')};")
         elif count < 10:
-            self.sequence_counter.setStyleSheet("color: #e74c3c; font-size: 10px; font-weight: bold;")
+            self.sequence_counter.setStyleSheet(f"color:{t.get('error')}; font-weight:600;")
         elif count > 50000:
-            self.sequence_counter.setStyleSheet("color: #e67e22; font-size: 10px; font-weight: bold;")
+            self.sequence_counter.setStyleSheet(f"color:{t.get('warning')}; font-weight:600;")
         else:
-            self.sequence_counter.setStyleSheet("color: #1e8449; font-size: 10px; font-weight: bold;")
-    
+            self.sequence_counter.setStyleSheet(f"color:{t.get('success')}; font-weight:600;")
+
+    # ── FASTA upload ──────────────────────────────────────────────
+
     def _upload_fasta_file(self):
-        """Open file dialog and load FASTA file"""
         filepath, _ = QFileDialog.getOpenFileName(
-            self,
-            "Open FASTA File",
-            "",
-            "FASTA Files (*.fasta *.fa *.fna *.ffn *.faa *.frn);;All Files (*)"
-        )
-        
+            self, "Open FASTA File", "",
+            "FASTA Files (*.fasta *.fa *.fna *.ffn *.faa *.frn);;All Files (*)")
         if not filepath:
             return
-        
         try:
             sequences = self.fasta_parser.parse_file(filepath)
-            
             if self.fasta_parser.has_warnings():
-                warnings_text = "\n".join(self.fasta_parser.get_warnings())
-                QMessageBox.warning(
-                    self,
-                    "FASTA Parsing Warnings",
-                    f"File loaded with warnings:\n\n{warnings_text}"
-                )
-            
+                QMessageBox.warning(self, "FASTA Parsing Warnings",
+                    f"File loaded with warnings:\n\n{chr(10).join(self.fasta_parser.get_warnings())}")
             self.loaded_sequences = sequences
             filename = os.path.basename(filepath)
-            
             if len(sequences) == 1:
-                self.fasta_file_label.setText(f"✓ {filename} ({len(sequences[0].sequence)} nt)")
+                self.fasta_file_label.setText(f"{filename} ({len(sequences[0].sequence)} nt)")
                 self.fasta_sequence_selector.setVisible(False)
                 self.input_text.setPlainText(sequences[0].sequence)
                 self.current_sequence_metadata = {
-                    'source': 'fasta_file',
-                    'filename': filename,
-                    'header': sequences[0].header,
-                    'id': sequences[0].id
-                }
+                    'source': 'fasta_file', 'filename': filename,
+                    'header': sequences[0].header, 'id': sequences[0].id}
             else:
-                self.fasta_file_label.setText(f"✓ {filename} ({len(sequences)} sequences)")
+                self.fasta_file_label.setText(f"{filename} ({len(sequences)} sequences)")
                 self.fasta_sequence_selector.clear()
-                
                 for seq in sequences:
-                    self.fasta_sequence_selector.addItem(
-                        f"{seq.id} ({len(seq.sequence)} nt)",
-                        seq
-                    )
-                
+                    self.fasta_sequence_selector.addItem(f"{seq.id} ({len(seq.sequence)} nt)", seq)
                 self.fasta_sequence_selector.setVisible(True)
                 self._on_fasta_sequence_selected(0)
-            
         except FastaParseError as e:
-            QMessageBox.critical(
-                self,
-                "FASTA Parsing Error",
-                f"Failed to parse FASTA file:\n\n{str(e)}"
-            )
+            QMessageBox.critical(self, "FASTA Parsing Error", f"Failed to parse FASTA file:\n\n{e}")
             self.fasta_file_label.setText("No file selected")
-    
+
     def _on_fasta_sequence_selected(self, index):
-        """Handle selection of a sequence from multi-FASTA file"""
         if index < 0 or not self.loaded_sequences:
             return
-        
-        selected_seq = self.fasta_sequence_selector.itemData(index)
-        if selected_seq:
-            self.input_text.setPlainText(selected_seq.sequence)
+        seq = self.fasta_sequence_selector.itemData(index)
+        if seq:
+            self.input_text.setPlainText(seq.sequence)
             self.current_sequence_metadata = {
-                'source': 'fasta_file',
-                'header': selected_seq.header,
-                'id': selected_seq.id
-            }
-    
+                'source': 'fasta_file', 'header': seq.header, 'id': seq.id}
+
+    # ── Nucleotide search dialog ──────────────────────────────────
+
     def _open_nucleotide_search(self):
-        """Open nucleotide search dialog"""
         dialog = NucleotideSearchDialog(self)
         dialog.sequence_selected.connect(self._on_nucleotide_selected)
         dialog.exec_()
-    
+
     def _on_nucleotide_selected(self, sequence, metadata):
-        """Handle nucleotide selection from search dialog"""
         accession = metadata.get('accession', 'Unknown')
         title = metadata.get('title', 'Unknown')
         organism = metadata.get('organism', 'Unknown')
         length = metadata.get('length', 0)
-        
-        # Truncate title for display
         display_title = title[:50] + "..." if len(title) > 50 else title
-        
-        reply = QMessageBox.question(
-            self,
-            "Load Sequence",
+        reply = QMessageBox.question(self, "Load Sequence",
             f"Load nucleotide sequence?\n\n"
             f"Accession: {accession}\n"
             f"Title: {display_title}\n"
             f"Organism: {organism}\n"
             f"Length: {length:,} nucleotides",
-            QMessageBox.Yes | QMessageBox.No
-        )
-        
+            QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             self.input_text.setPlainText(sequence)
             self.current_sequence_metadata = {
-                'source': 'genbank',
-                'accession': accession,
-                'title': title,
-                'organism': organism,
-                'id': accession
-            }
-            self.search_info_label.setText(
-                f"✓ Loaded: {accession} ({organism})"
-            )
-            self.search_info_label.setStyleSheet("color: #1e8449; font-weight: bold;")
-    
-    def _export_results(self, format_type):
-        """Export results to TSV or CSV"""
+                'source': 'genbank', 'accession': accession,
+                'title': title, 'organism': organism, 'id': accession}
+            self.search_info_label.setText(f"Loaded: {accession} ({organism})")
+            self.search_info_label.setStyleSheet(
+                f"color:{get_theme().get('success')}; font-weight:600;")
+
+    # ── Database helpers ──────────────────────────────────────────
+
+    def on_database_changed(self):
+        self.update_database_description()
+
+    def update_database_description(self):
+        text = self.db_combo.currentText()
+        db = text.split(' - ')[0] if ' - ' in text else text
+        desc = NUCLEOTIDE_DATABASES.get(db, "Database information not available")
+        self.db_description.setText(desc)
+
+    def on_database_source_changed(self):
+        remote = self.remote_radio.isChecked()
+        self.local_db_label.setEnabled(not remote)
+        self.local_db_path.setEnabled(not remote)
+        self.browse_button.setEnabled(not remote)
+
+    def browse_database_path(self):
+        d = QFileDialog.getExistingDirectory(self, "Select Database Directory", "",
+            QFileDialog.ShowDirsOnly)
+        if d:
+            self.local_db_path.setText(d)
+
+    # ── Export ────────────────────────────────────────────────────
+
+    def _export_results(self, fmt):
         if not self.current_results_html:
-            QMessageBox.warning(
-                self,
-                "No Results",
-                "No results available to export. Please run a search first."
-            )
+            QMessageBox.warning(self, "No Results", "No results available to export.")
             return
-        
         query_name = self.current_sequence_metadata.get('id', 'query')
-        default_filename = self.exporter.get_default_filename('blastn', query_name)
-        
-        ext = format_type.upper()
-        filepath, _ = QFileDialog.getSaveFileName(
-            self,
-            f"Save Results as {ext}",
-            f"{default_filename}.{format_type}",
-            f"{ext} Files (*.{format_type});;All Files (*)"
-        )
-        
-        if not filepath:
+        default_fn = self.exporter.get_default_filename('blastn', query_name)
+        ext = fmt.upper()
+        fp, _ = QFileDialog.getSaveFileName(self, f"Save Results as {ext}",
+            f"{default_fn}.{fmt}", f"{ext} Files (*.{fmt});;All Files (*)")
+        if not fp:
             return
-        
         try:
-            success = self.exporter.export_blast_results(
-                self.current_results_html,
-                self.current_query_info,
-                filepath,
-                format_type
-            )
-            
-            if success:
-                show_export_success(self, filepath)
-        
+            if self.exporter.export_blast_results(
+                    self.current_results_html, self.current_query_info, fp, fmt):
+                show_export_success(self, fp)
         except ExportError as e:
             show_export_error(self, e)
-    
-    def on_database_changed(self):
-        """Update database description when selection changes"""
-        self.update_database_description()
-    
-    def update_database_description(self):
-        """Update the database description label"""
-        current_text = self.db_combo.currentText()
-        current_db = current_text.split(' - ')[0] if ' - ' in current_text else current_text
-        description = NUCLEOTIDE_DATABASES.get(current_db, "Database information not available")
-        self.db_description.setText(f"📋 {description}")
-    
-    def on_database_source_changed(self):
-        """Enable/disable local database options based on remote checkbox"""
-        is_remote = self.remote_radio.isChecked()
-        self.local_db_label.setEnabled(not is_remote)
-        self.local_db_path.setEnabled(not is_remote)
-        self.browse_button.setEnabled(not is_remote)
-    
-    def browse_database_path(self):
-        """Open file dialog to select database directory"""
-        directory = QFileDialog.getExistingDirectory(
-            self, 
-            "Select Database Directory",
-            "",
-            QFileDialog.ShowDirsOnly
-        )
-        if directory:
-            self.local_db_path.setText(directory)
-    
+
+    # ── Run BLASTN ────────────────────────────────────────────────
+
     def run_blast(self):
-        """Run BLASTN search in background thread"""
         sequence = self.input_text.toPlainText().strip().upper()
-        
         if not sequence:
-            self.output_text.setText("Please enter a nucleotide sequence first.")
+            self.status_label.setText("Please enter a nucleotide sequence first.")
             return
-        
-        # Remove whitespace
         sequence = ''.join(c for c in sequence if c.isalpha())
-        
-        # Validate nucleotide sequence
         is_valid, invalid_chars = validate_nucleotide_sequence(sequence)
         if not is_valid:
-            self.output_text.setText(
-                f"Error: Invalid nucleotide sequence.\n\n"
-                f"Found invalid characters: {', '.join(sorted(invalid_chars))}\n\n"
-                f"Valid nucleotide codes: A, T, G, C, N, and IUPAC ambiguity codes (R, Y, S, W, K, M, B, D, H, V)"
-            )
+            self.status_label.setText(
+                f"Invalid sequence: found characters {', '.join(sorted(invalid_chars))}")
             return
-        
-        # Disable run button, show cancel button
+
         self.process_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.cancel_button.show()
         self.status_label.setText("Running BLASTN search... This may take several minutes.")
-        self.output_text.setText(
-            "Searching NCBI database...\n\n"
-            "Remote searches can take 1-5 minutes depending on database size.\n"
-            "The 'nt' database is very large - consider using 'refseq_rna' for faster results.\n\n"
-            "Click 'Cancel Search' to stop the search."
-        )
-        
-        # Get selected database and options
-        database_text = self.db_combo.currentText()
-        database = database_text.split(' - ')[0] if ' - ' in database_text else database_text
+        self.results_panel.clear()
+
+        db_text = self.db_combo.currentText()
+        database = db_text.split(' - ')[0] if ' - ' in db_text else db_text
         use_remote = self.remote_radio.isChecked()
-        local_db_path = self.local_db_path.text().strip()
-        
-        # Get advanced parameters
-        advanced_params = self._get_advanced_params()
-        
-        # Start BLASTN in background thread
+        local_path = self.local_db_path.text().strip()
+
         self.search_start_time = time.time()
         self.blast_worker = BLASTNWorker(
-            sequence, database, use_remote, local_db_path,
-            advanced_params=advanced_params
-        )
+            sequence, database, use_remote, local_path,
+            advanced_params=self._get_advanced_params())
         self.blast_worker.finished.connect(self.on_blast_finished)
         self.blast_worker.error.connect(self.on_blast_error)
         self.blast_worker.progress.connect(self._on_blast_progress)
         self.blast_worker.start()
-    
+
     def _cancel_search(self):
-        """Cancel the running BLAST search"""
         if self.blast_worker and self.blast_worker.isRunning():
             self.blast_worker.cancel()
             self.status_label.setText("Cancelling search...")
             self.cancel_button.setEnabled(False)
-    
+
     def _on_blast_progress(self, message):
-        """Handle progress updates from BLAST worker"""
         self.status_label.setText(message)
-    
-    def extract_stats_from_html(self, html_results):
-        """Extract statistics from HTML results"""
-        import re
-        
-        hits_match = re.search(r'Found (\d+) significant alignment', html_results)
-        total_hits = int(hits_match.group(1)) if hits_match else 0
-        
-        evalue_matches = re.findall(r'E-value:</span> <b[^>]*>([\d\.e\-+]+)</b>', html_results)
-        best_evalue = min([float(e) for e in evalue_matches]) if evalue_matches else None
-        
-        identity_matches = re.findall(r'Identity:</span> <b[^>]*>\d+/\d+ \(([\d\.]+)%\)</b>', html_results)
-        avg_identity = sum([float(i) for i in identity_matches]) / len(identity_matches) if identity_matches else 0
-        
-        return total_hits, best_evalue, avg_identity
-    
-    def update_summary_panel(self, total_hits, best_evalue, avg_identity, search_time):
-        """Update the summary statistics panel"""
-        self.stat_hits.setText(str(total_hits))
-        
-        if best_evalue is not None:
-            if best_evalue < 1e-100:
-                self.stat_best_eval.setText(f"{best_evalue:.1e}")
-                self.stat_best_eval.setStyleSheet("font-size: 18px; font-weight: bold; color: #1e8449;")
-            elif best_evalue < 1e-10:
-                self.stat_best_eval.setText(f"{best_evalue:.1e}")
-                self.stat_best_eval.setStyleSheet("font-size: 18px; font-weight: bold; color: #f39c12;")
-            else:
-                self.stat_best_eval.setText(f"{best_evalue:.1e}")
-                self.stat_best_eval.setStyleSheet("font-size: 18px; font-weight: bold; color: #e67e22;")
-        else:
-            self.stat_best_eval.setText("N/A")
-            self.stat_best_eval.setStyleSheet("font-size: 18px; font-weight: bold; color: #95a5a6;")
-        
-        if avg_identity > 0:
-            self.stat_avg_identity.setText(f"{avg_identity:.1f}%")
-            if avg_identity >= 90:
-                self.stat_avg_identity.setStyleSheet("font-size: 18px; font-weight: bold; color: #1e8449;")
-            elif avg_identity >= 70:
-                self.stat_avg_identity.setStyleSheet("font-size: 18px; font-weight: bold; color: #f39c12;")
-            else:
-                self.stat_avg_identity.setStyleSheet("font-size: 18px; font-weight: bold; color: #e67e22;")
-        else:
-            self.stat_avg_identity.setText("N/A")
-            self.stat_avg_identity.setStyleSheet("font-size: 18px; font-weight: bold; color: #95a5a6;")
-        
-        self.stat_search_time.setText(f"{search_time:.1f}s")
-        
-        self.summary_panel.show()
-    
+
     def on_blast_finished(self, results_html, results_data):
-        """Handle BLASTN results"""
-        search_time = time.time() - self.search_start_time if self.search_start_time else 0
-        
+        elapsed = time.time() - self.search_start_time if self.search_start_time else 0
         self.current_results_html = results_html
         self.current_results_data = results_data
         self.current_query_info = {
+            'tool': 'BLASTN',
             'query_name': self.current_sequence_metadata.get('id', 'query'),
             'query_length': str(len(self.input_text.toPlainText().strip())),
             'database': self.db_combo.currentText().split(' - ')[0],
-            'search_time': f"{search_time:.1f}s"
+            'search_time': f"{elapsed:.1f}s",
         }
-        
-        total_hits, best_evalue, avg_identity = self.extract_stats_from_html(results_html)
-        self.update_summary_panel(total_hits, best_evalue, avg_identity, search_time)
-        
-        self.output_text.setHtml(results_html)
+        self.results_panel.set_results(results_data, self.current_query_info)
         self.status_label.setText("Search complete!")
         self.process_button.setEnabled(True)
         self.cancel_button.hide()
         self.cancel_button.setEnabled(False)
-        
-        self.export_tsv_button.setEnabled(True)
-        self.export_csv_button.setEnabled(True)
-    
+
     def on_blast_error(self, error_msg):
-        """Handle BLASTN errors"""
+        self.results_panel.clear()
+        self.status_label.setText(f"Error: {error_msg[:120]}")
+        self.process_button.setEnabled(True)
         self.cancel_button.hide()
         self.cancel_button.setEnabled(False)
-        self.summary_panel.hide()
-        self.output_text.setPlainText(f"Error running BLASTN:\n\n{error_msg}")
-        self.status_label.setText("Error occurred")
-        self.process_button.setEnabled(True)
-

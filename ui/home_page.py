@@ -1,232 +1,131 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QLabel, QPushButton, 
-                             QGridLayout, QFrame, QScrollArea, QSizePolicy)
+from PyQt5.QtWidgets import (
+    QWidget, QVBoxLayout, QLabel, QPushButton,
+    QGridLayout, QFrame, QScrollArea, QSizePolicy
+)
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QFont
+
+from ui.theme import get_theme, PAGE_ACCENTS
+from ui.icons import feather_icon
 
 
 class ServiceCard(QFrame):
-    """A card widget for displaying a service button with description"""
+    """Card widget for a service on the home page."""
     clicked = pyqtSignal()
-    
-    def __init__(self, title, description, color, hover_color, pressed_color, parent=None):
+
+    def __init__(self, title, description, accent, icon_name=None, parent=None):
         super().__init__(parent)
-        self.setFrameShape(QFrame.StyledPanel)
-        self.setStyleSheet(f"""
-            ServiceCard {{
-                background-color: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 10px;
-            }}
-            ServiceCard:hover {{
-                border: 1px solid {color};
-            }}
-        """)
-        
+        self.setProperty("class", "card")
+        self.setCursor(Qt.PointingHandCursor)
+
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
+        layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(10)
-        
-        # Button
-        self.button = QPushButton(title)
-        self.button.setMinimumHeight(60)
-        self.button.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
-        self.button.setStyleSheet(f"""
+
+        btn = QPushButton(title)
+        btn.setMinimumHeight(54)
+        btn.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        if icon_name:
+            btn.setIcon(feather_icon(icon_name, 18, "#FFFFFF"))
+        btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {color};
+                background-color: {accent};
                 color: white;
                 border: none;
                 border-radius: 8px;
                 font-size: 14px;
-                font-weight: bold;
-                padding: 15px;
+                font-weight: 600;
+                padding: 14px;
             }}
             QPushButton:hover {{
-                background-color: {hover_color};
-            }}
-            QPushButton:pressed {{
-                background-color: {pressed_color};
+                opacity: 0.9;
             }}
         """)
-        self.button.clicked.connect(self.clicked.emit)
-        
-        # Description
-        self.desc_label = QLabel(description)
-        self.desc_label.setWordWrap(True)
-        self.desc_label.setAlignment(Qt.AlignCenter)
-        self.desc_label.setStyleSheet("""
-            QLabel {
-                color: #666666;
-                font-size: 11px;
-                padding: 5px;
-                background: transparent;
-            }
-        """)
-        self.desc_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
-        
-        layout.addWidget(self.button)
-        layout.addWidget(self.desc_label)
-        
+        btn.clicked.connect(self.clicked.emit)
+
+        desc_lbl = QLabel(description)
+        desc_lbl.setWordWrap(True)
+        desc_lbl.setAlignment(Qt.AlignCenter)
+        desc_lbl.setProperty("class", "muted")
+        desc_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
+
+        layout.addWidget(btn)
+        layout.addWidget(desc_lbl)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
 
 class HomePage(QWidget):
-    """Home page widget with service selection"""
+    """Home page with service selection cards."""
     service_selected = pyqtSignal(str)
-    
+
     def __init__(self):
         super().__init__()
-        self.init_ui()
-    
-    def init_ui(self):
-        """Initialize the home page UI"""
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Scroll area for smaller screens
+        self._init_ui()
+
+    def _init_ui(self):
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
-        
-        # Content widget
+
         content = QWidget()
-        content.setStyleSheet("background-color: #f8f9fa;")
         layout = QVBoxLayout(content)
-        layout.setSpacing(25)
-        layout.setContentsMargins(40, 40, 40, 40)
-        
-        # Welcome section
-        welcome_frame = QFrame()
-        welcome_frame.setStyleSheet("""
-            QFrame {
-                background-color: white;
-                border: 1px solid #e0e0e0;
-                border-radius: 12px;
-            }
-        """)
-        welcome_layout = QVBoxLayout(welcome_frame)
-        welcome_layout.setContentsMargins(30, 25, 30, 25)
-        welcome_layout.setSpacing(8)
-        
-        # Title
-        title_label = QLabel("Sen Lab - Protein Analysis Suite")
-        title_font = QFont()
-        title_font.setPointSize(22)
-        title_font.setBold(True)
-        title_label.setFont(title_font)
-        title_label.setAlignment(Qt.AlignCenter)
-        title_label.setStyleSheet("color: #2c3e50; background: transparent;")
-        
-        # Subtitle
-        subtitle_label = QLabel("Select a bioinformatics tool to analyze your sequences")
-        subtitle_font = QFont()
-        subtitle_font.setPointSize(11)
-        subtitle_label.setFont(subtitle_font)
-        subtitle_label.setAlignment(Qt.AlignCenter)
-        subtitle_label.setStyleSheet("color: #7f8c8d; background: transparent;")
-        
-        welcome_layout.addWidget(title_label)
-        welcome_layout.addWidget(subtitle_label)
-        
-        # Services section header
-        services_header = QLabel("Available Services")
-        services_font = QFont()
-        services_font.setPointSize(14)
-        services_font.setBold(True)
-        services_header.setFont(services_font)
-        services_header.setStyleSheet("color: #34495e; background: transparent;")
-        
-        # Services grid
+        layout.setSpacing(24)
+        layout.setContentsMargins(40, 36, 40, 36)
+
+        t = get_theme()
+
+        # Welcome banner
+        banner = QFrame()
+        banner.setProperty("class", "card")
+        banner_layout = QVBoxLayout(banner)
+        banner_layout.setContentsMargins(30, 24, 30, 24)
+        banner_layout.setSpacing(8)
+
+        title = QLabel("Sen Lab - Protein Analysis Suite")
+        title.setProperty("class", "title")
+        title.setAlignment(Qt.AlignCenter)
+
+        subtitle = QLabel("Select a bioinformatics tool to analyse your sequences")
+        subtitle.setProperty("class", "muted")
+        subtitle.setAlignment(Qt.AlignCenter)
+
+        banner_layout.addWidget(title)
+        banner_layout.addWidget(subtitle)
+
+        # Section header
+        section_header = QLabel("Available Services")
+        section_header.setProperty("class", "heading")
+
+        # Service cards grid
         grid_widget = QWidget()
-        grid_widget.setStyleSheet("background: transparent;")
-        grid_layout = QGridLayout(grid_widget)
-        grid_layout.setSpacing(15)
-        grid_layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Create service cards
+        grid = QGridLayout(grid_widget)
+        grid.setSpacing(16)
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+
         services = [
-            {
-                "id": "blast",
-                "title": "BLASTP Search",
-                "desc": "Search protein sequences against NCBI databases to find homologous proteins",
-                "color": "#3498db",
-                "hover": "#2980b9", 
-                "pressed": "#21618c",
-                "row": 0, "col": 0
-            },
-            {
-                "id": "blastn",
-                "title": "BLASTN Search",
-                "desc": "Search nucleotide sequences against NCBI databases for DNA/RNA homology",
-                "color": "#1e8449",
-                "hover": "#196f3d",
-                "pressed": "#145a32",
-                "row": 0, "col": 1
-            },
-            {
-                "id": "mmseqs",
-                "title": "MMseqs2 Search",
-                "desc": "Fast and sensitive protein sequence searching using MMseqs2",
-                "color": "#9b59b6",
-                "hover": "#8e44ad",
-                "pressed": "#7d3c98",
-                "row": 1, "col": 0
-            },
-            {
-                "id": "clustering",
-                "title": "MMseqs2 Clustering",
-                "desc": "Cluster protein sequences by similarity to group related sequences",
-                "color": "#e67e22",
-                "hover": "#d35400",
-                "pressed": "#ba4a00",
-                "row": 1, "col": 1
-            },
-            {
-                "id": "alignment",
-                "title": "Sequence Alignment",
-                "desc": "Multiple sequence alignment using Clustal Omega with ClustalX visualization",
-                "color": "#1abc9c",
-                "hover": "#16a085",
-                "pressed": "#149174",
-                "row": 2, "col": 0
-            },
-            {
-                "id": "motif_search",
-                "title": "Motif Search",
-                "desc": "Find glycosylation motifs in protein sequences with phylogeny-based visualization",
-                "color": "#e91e63",
-                "hover": "#c2185b",
-                "pressed": "#ad1457",
-                "row": 2, "col": 1
-            },
-            {
-                "id": "database_downloads",
-                "title": "Database Downloads",
-                "desc": "Download and manage protein databases for BLAST and MMseqs2 searches",
-                "color": "#00897b",
-                "hover": "#00796b",
-                "pressed": "#00695c",
-                "row": 3, "col": 0
-            },
+            ("protein_search", "Protein Search",     "Search protein sequences using BLASTP or MMseqs2 against local or remote databases", "search"),
+            ("blastn",         "BLASTN Search",      "Search nucleotide sequences against NCBI databases for DNA/RNA homology",            "search"),
+            ("clustering",     "MMseqs2 Clustering", "Cluster protein sequences by similarity to group related sequences",                 "grid"),
+            ("alignment",      "Sequence Alignment", "Multiple sequence alignment using Clustal Omega with ClustalX visualisation",        "bar-chart-2"),
+            ("motif_search",   "Motif Search",       "Find glycosylation motifs in protein sequences with visualisation",                  "filter"),
+            ("database_downloads","Database Downloads","Download and manage protein databases for BLAST and MMseqs2 searches",             "database"),
         ]
-        
-        for svc in services:
-            card = ServiceCard(
-                svc["title"], 
-                svc["desc"], 
-                svc["color"], 
-                svc["hover"], 
-                svc["pressed"]
-            )
-            card.clicked.connect(lambda checked=False, sid=svc["id"]: self.service_selected.emit(sid))
-            
-            grid_layout.addWidget(card, svc["row"], svc["col"])
-        
-        # Assemble layout
-        layout.addWidget(welcome_frame)
-        layout.addWidget(services_header)
+
+        for idx, (sid, title_text, desc, icon) in enumerate(services):
+            accent = PAGE_ACCENTS.get(sid.replace("_downloads", "").replace("_search", ""),
+                                      t.get("accent"))
+            card = ServiceCard(title_text, desc, accent, icon)
+            card.clicked.connect(lambda _=False, s=sid: self.service_selected.emit(s))
+            grid.addWidget(card, idx // 2, idx % 2)
+
+        layout.addWidget(banner)
+        layout.addWidget(section_header)
         layout.addWidget(grid_widget)
         layout.addStretch()
-        
+
         scroll.setWidget(content)
-        main_layout.addWidget(scroll)
+        root.addWidget(scroll)
