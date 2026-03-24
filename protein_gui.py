@@ -14,10 +14,11 @@ from ui.clustering_page import ClusteringPage
 from ui.alignment_page import AlignmentPage
 from ui.motif_search_page import MotifSearchPage
 from ui.database_downloads_page import DatabaseDownloadsPage
+from ui.tools_page import ToolsPage
 
 TAB_ICONS = [
     "home", "search", "search",
-    "grid", "bar-chart-2", "filter", "database",
+    "grid", "bar-chart-2", "filter", "tool", "database",
 ]
 
 
@@ -51,6 +52,7 @@ class ProteinGUI(QMainWindow):
         self.clustering_page = ClusteringPage()
         self.alignment_page = AlignmentPage()
         self.motif_search_page = MotifSearchPage()
+        self.tools_page = ToolsPage()
         self.database_downloads_page = DatabaseDownloadsPage()
 
         # Add tabs with Feather icons
@@ -60,6 +62,7 @@ class ProteinGUI(QMainWindow):
         self.tabs.addTab(self.clustering_page,          feather_icon("grid", 18),           "Clustering")
         self.tabs.addTab(self.alignment_page,           feather_icon("bar-chart-2", 18),    "Alignment")
         self.tabs.addTab(self.motif_search_page,        feather_icon("filter", 18),         "Motif Search")
+        self.tabs.addTab(self.tools_page,               feather_icon("tool", 18),           "Tools")
         self.tabs.addTab(self.database_downloads_page,  feather_icon("database", 18),       "Databases")
 
         # Theme toggle integrated into the tab bar as a corner widget
@@ -97,6 +100,7 @@ class ProteinGUI(QMainWindow):
             "clustering":         self.clustering_page,
             "alignment":          self.alignment_page,
             "motif_search":       self.motif_search_page,
+            "tools":              self.tools_page,
             "database_downloads": self.database_downloads_page,
         }
         page = page_map.get(service)
@@ -111,7 +115,8 @@ class ProteinGUI(QMainWindow):
             3: "Sen Lab - MMseqs2 Clustering",
             4: "Sen Lab - Sequence Alignment",
             5: "Sen Lab - Motif Search",
-            6: "Sen Lab - Database Downloads",
+            6: "Sen Lab - Tools",
+            7: "Sen Lab - Database Downloads",
         }
         self.setWindowTitle(titles.get(index, "Sen Lab"))
 

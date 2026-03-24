@@ -36,7 +36,7 @@ class ConfigManager:
             print("=" * 60)
             print("This appears to be your first time running on this machine.")
             print("The GUI can install most required tools for you from inside the app.")
-            print("You can still run: python setup_wizard.py for diagnostics or manual paths.")
+            print("You can still run: python setup_wizard.py for diagnostics or inspect config.json for advanced overrides.")
             print("=" * 60)
             return self._get_defaults()
     

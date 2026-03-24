@@ -1,141 +1,174 @@
 # Sen Lab Protein Sequence Analysis Suite
 
-A comprehensive GUI application built with PyQt5 for protein sequence analysis, featuring BLASTP searches, MMseqs2 searches, and protein clustering capabilities. Designed for both remote NCBI databases and local database files with full cross-platform support.
+Protein-GUI is a PyQt5 desktop application for sequence search, clustering, alignment, motif inspection, and database management. The app now supports an app-managed tool runtime so most users can install required command-line tools from inside the GUI instead of configuring PATHs by hand.
 
-## Overview
+## Main Workflows
 
-This application provides a complete workflow for protein sequence analysis:
+- `Protein Search`: unified protein search page with BLASTP or MMseqs2 selection
+- `BLASTN`: nucleotide search against remote NCBI databases or local BLAST databases
+- `Clustering`: MMseqs2 clustering from FASTA input or selected search results
+- `Alignment`: Clustal Omega multiple sequence alignment with export support
+- `Motif Search`: glycosylation motif analysis and result visualization
+- `Tools`: install and manage BLAST+, MMseqs2, blastdbcmd, and Clustal Omega
+- `Databases`: download and manage sequence databases for BLAST and MMseqs2
 
-1. **Search**: Run BLASTP or MMseqs2 searches against protein databases
-2. **Analyze**: View detailed results with statistics and alignments
-3. **Export**: Save results in TSV or CSV format
-4. **Cluster**: Select interesting results and perform sequence clustering
-5. **Visualize**: Interactive charts with zoom capabilities
+## Default Setup
 
-## Features
+1. Install Python dependencies:
 
-### Search Tools
-- **BLASTP Search**: Industry-standard protein sequence alignment
-- **MMseqs2 Search**: Ultra-fast protein sequence search (up to 400x faster than BLAST)
-- **Remote & Local Databases**: Use NCBI remote servers or local database files
-- **Multiple Input Methods**: 
-  - Paste sequences directly
-  - Upload FASTA files (including multi-sequence support)
-  - Search by protein name or UniProt ID via AlphaFold database
+```bash
+pip install -r requirements.txt
+```
 
-### Results Analysis
-- **Detailed Statistics**: E-values, bit scores, identity percentages, query coverage
-- **Interactive Results**: Click to view full alignments and sequence details
-- **Real-time Summary Panel**: Total hits, best E-value, average identity
-- **Export Options**: Save results as TSV or CSV files
+2. Launch the app:
 
-### Clustering
-- **Cluster from Search Results**: Select interesting hits and cluster them directly
-- **Multiple Selection Modes**: 
-  - Top N matches
-  - E-value threshold
-  - Manual checkbox selection
-- **MMseqs2 Clustering**: Fast and sensitive sequence clustering
-- **Configurable Parameters**: Adjust identity threshold, coverage, and sensitivity
-- **Interactive Visualization**: Distribution charts with zoom and pan
+```bash
+python protein_gui.py
+```
 
-### User Interface
-- **Resizable Layouts**: Drag-and-drop splitters for custom workspace
-- **Persistent Settings**: UI state saved between sessions
-- **Chart Zoom Controls**: Ctrl+Scroll or button controls for chart viewing
-- **Progress Tracking**: Real-time progress for long-running operations
-- **Cross-platform**: Works on Windows with WSL support for MMseqs2
+3. Install tools from inside the GUI when needed:
+- Open the `Tools` tab in the main navigation bar and install or repair tools there.
+- Or start a feature such as Protein Search, BLASTN, Alignment, or Clustering and accept the just-in-time install prompt.
 
-### BLASTP Search
+For most users, this is now the recommended setup path. You should not need to manually install `blastp`, `blastn`, `mmseqs`, `blastdbcmd`, or `clustalo` first on supported platforms.
 
-1. **Input your sequence** using one of three methods:
-   - **Paste**: Directly paste amino acid sequence
-   - **Upload FASTA**: Select a FASTA file from your computer
-   - **Search Protein**: Search by protein name or UniProt ID
-   
-2. **Configure search parameters**:
-   - Choose between remote NCBI or local database
-   - Select database (SwissProt, nr, PDB, etc.)
-   - Browse to custom database location if needed
+## Managed Runtime
 
-3. **Run the search**:
-   - Click "Run BLASTP Search"
-   - Monitor progress in real-time
-   - View results with statistics
+The managed runtime uses a private micromamba environment owned by the app.
 
-4. **Work with results**:
-   - Export as TSV or CSV
-   - Click "Cluster Results" to cluster selected hits
+- Managed tools live in a per-user tools directory.
+- Tool resolution is handled centrally by `core/tool_runtime.py`.
+- The runtime can prefer `managed`, `configured`, `system`, or `wsl` sources.
+- Tool status is surfaced in the GUI and persisted in a lightweight tool-state store.
 
-### MMseqs2 Search
+### Tools tab
 
-1. **Input your sequence** (same three methods as BLASTP)
+The `Tools` tab in the main window lists each external dependency as a card.
 
-2. **Configure parameters**:
-   - Select database
-   - Choose sensitivity level (fast, sensitive, very sensitive)
-   - Databases must be converted to MMseqs2 format (automatic prompt)
+Each tool card shows:
+- current availability
+- current source (`managed`, `system`, `configured`, or `wsl`)
+- detected version
+- executable path when available
 
-3. **View results** and export or cluster as needed
+Each tool card supports:
+- managed install or repair, when the platform supports it
+- switching source preference
+- refreshing detection status
 
-### Clustering Workflow
+## Platform Behavior
 
-#### From Search Results:
-1. Run a BLASTP or MMseqs2 search
-2. Click "Cluster Results" button
-3. **Select sequences** using:
-   - Top N matches (e.g., top 50)
-   - E-value threshold (e.g., < 1e-10)
-   - Manual checkbox selection
-4. **Configure clustering**:
-   - View sequence retrieval summary
-   - Choose clustering method (easy-cluster or linclust)
-   - Adjust parameters (identity, coverage, sensitivity)
-5. **View results**:
-   - Interactive distribution chart
-   - Detailed cluster table
-   - Export options
+### macOS and Linux
 
-#### From FASTA File:
-1. Select "MMseqs2 Clustering" from home screen
-2. Upload FASTA file
-3. Configure clustering parameters
-4. Run clustering
-5. View and export results
+- Managed native installs are the preferred path.
+- The Tools tab and JIT prompts can install supported tools into the app-managed environment.
+- You can still use configured or system tools if you prefer.
 
-### Advanced Features
+### Windows
 
-#### Chart Viewing
-- Click "Maximize Chart" to open full-screen view
-- Use Ctrl+Scroll to zoom in/out
-- Use zoom buttons: +, -, 100%, Fit to Window
-- Zoom range: 10% to 500%
+- Windows currently relies on `WSL` or system-backed tool execution for these bioinformatics tools.
+- The GUI still exposes tool status and source selection, but managed micromamba installs are not the primary path on Windows right now.
+- Windows users should make sure WSL is installed and that required tools are available there when applicable.
 
-#### Export Options
-- **TSV/CSV Export**: Save search results with all metadata
-- **FASTA Export**: Save representative sequences from clusters
-- **Cluster TSV**: Export detailed cluster membership
+## Feature-to-Tool Mapping
 
-#### Sequence Input
-- **Multi-FASTA Support**: Upload files with multiple sequences
-- **AlphaFold Database**: Search by protein name and auto-populate sequence
-- **UniProt Integration**: Automatic sequence retrieval from UniProt
-- **Validation**: Real-time sequence length counter and validation
+- `Protein Search` with BLASTP requires `BLAST+`
+- `Protein Search` with MMseqs2 requires `MMseqs2`
+- MMseqs2 protein searches that need BLAST database conversion also require `blastdbcmd`
+- `BLASTN` requires `BLAST+`
+- `Alignment` requires `Clustal Omega`
+- `Clustering` requires `MMseqs2`
 
-## Architecture
+## Databases vs Tools
 
-### Core Components
-- `protein_gui.py`: Main application entry point
-- `ui/`: User interface pages and dialogs
-- `core/`: Workers for BLAST, MMseqs2, and clustering operations
-- `utils/`: Helper modules for parsing, export, and sequence retrieval
+Tools and databases are managed separately.
 
-### Key Features
-- **Non-blocking Operations**: All searches use QThread workers
-- **Automatic Cleanup**: Temporary files cleaned on exit
-- **Persistent State**: UI preferences saved with QSettings
-- **Error Handling**: Comprehensive validation and user feedback
+- Tools are executables such as `blastp`, `blastn`, `mmseqs`, `blastdbcmd`, and `clustalo`.
+- Tools can be installed through the managed runtime on supported platforms.
+- Databases are search datasets stored outside the managed runtime.
+- Local BLAST databases live under `blast_databases/` by default.
+- Local MMseqs2 databases live under `mmseqs_databases/` by default.
 
-This is a research tool developed by the Sen Lab team at the University of Houston team biologists world-wide. For questions or issues, please contact Sen Lab.
+Installing a tool does not download search databases for you. Database downloads and installs are handled from the `Databases` page.
+
+## Results and Navigation
+
+- Protein and nucleotide search results are shown in native Qt result panels rather than raw HTML-only views.
+- Search results can be exported.
+- Protein search results can flow directly into clustering or alignment.
+- Alignment, clustering, and other analysis pages use resizable layouts so users can inspect outputs in larger panes.
+
+## Advanced Configuration
+
+Advanced users can still control resolution behavior through `config.json`.
+
+Relevant settings include:
+- `preferred_tool_sources`
+- `tool_source_overrides`
+- `managed_tools_root`
+- `managed_env_name`
+- explicit configured paths such as `blast_path`, `mmseqs_path`, `clustalo_path`, and `blastdbcmd_path`
+
+`setup_wizard.py` is now a diagnostics tool. It reports what the runtime sees, but it does not rewrite `config.json` as part of normal use.
+
+## Diagnostics
+
+Run the diagnostics tool if you want a terminal-readable snapshot of the current runtime state:
+
+```bash
+python setup_wizard.py
+```
+
+Optional pause for double-click launches:
+
+```bash
+python setup_wizard.py --pause
+```
+
+## Troubleshooting
+
+### A tool says missing
+
+- Open the `Tools` tab and inspect the tool card.
+- If managed installs are supported on your platform, use `Install` or `Repair Managed Install`.
+- If you are on Windows, verify the tool is available in WSL/system tooling instead.
+
+### A feature prompts for install every time
+
+- Refresh the relevant tool card in the `Tools` tab.
+- Check whether a source override is forcing the app to use `system` or `wsl` instead of `managed`.
+- Re-run the feature after install to confirm the post-install source is the one you expect.
+
+### MMseqs2 cannot search a BLAST database
+
+- MMseqs2 uses its own database format.
+- The app can prompt to convert compatible BLAST databases when `blastdbcmd` and `mmseqs` are available.
+
+### BLASTN remote searches are slow
+
+- Remote BLASTN is inherently slower than local searches.
+- Prefer smaller remote databases when possible.
+- For repeated work, install local nucleotide databases and run BLASTN locally.
+
+### Managed install fails
+
+- Retry from the Tools tab.
+- Check network availability.
+- Re-run `python setup_wizard.py` to inspect the runtime state.
+- If needed, remove or repair the managed tools directory configured by `managed_tools_root`.
+
+### Windows setup is confusing
+
+- Start by confirming `wsl --status` works.
+- Install the required bioinformatics tools inside WSL if the Tools tab reports they are missing.
+- Use the diagnostics tool to compare what the terminal sees with what the GUI shows.
+
+## Project Structure
+
+- `protein_gui.py`: app entry point, main window, tab navigation, theme toggle
+- `ui/`: feature pages, dialogs, widgets, and theming
+- `core/`: workers, runtime resolution, micromamba management, config, and database logic
+- `utils/`: parsing, export, and helper utilities
+- `tests/`: focused regression coverage for runtime and worker behavior
 
 Proprietary - Sen Lab
