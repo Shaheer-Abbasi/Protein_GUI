@@ -5,7 +5,8 @@ import os
 import shutil
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from core.wsl_utils import run_wsl_command, convert_path_for_tool, WSLError
+from core.tool_runtime import ToolRuntimeError, get_tool_runtime
+from core.wsl_utils import WSLError
 
 
 class ClusteringWorker(QThread):
@@ -37,9 +38,14 @@ class ClusteringWorker(QThread):
         
         try:
             temp_dir = tempfile.mkdtemp(prefix='mmseqs_cluster_')
-            temp_dir_tool = convert_path_for_tool(temp_dir)
+            runtime = get_tool_runtime()
+            resolution = runtime.resolve_tool("mmseqs")
+            if not resolution.executable:
+                self.error.emit("MMseqs2 is not available. Install it from the app or configure a valid executable path.")
+                return
+            temp_dir_tool = runtime.prepare_path(resolution, temp_dir)
             
-            fasta_tool = convert_path_for_tool(self.fasta_path)
+            fasta_tool = runtime.prepare_path(resolution, self.fasta_path)
             db_tool = f"{temp_dir_tool}/DB"
             clu_tool = f"{temp_dir_tool}/DB_clu"
             tmp_tool = f"{temp_dir_tool}/tmp"
@@ -55,8 +61,11 @@ class ClusteringWorker(QThread):
             
             # Step 1: Create database (0-20%)
             self.progress.emit(5, "Creating MMseqs2 database from FASTA file...")
-            cmd_createdb = f'mmseqs createdb "{fasta_tool}" "{db_tool}"'
-            result = run_wsl_command(cmd_createdb, timeout=300)
+            result = runtime.run_resolved(
+                resolution,
+                ["createdb", fasta_tool, db_tool],
+                timeout=300,
+            )
             
             if result.returncode != 0:
                 self.error.emit(f"Error creating database:\n{result.stderr}")
@@ -71,23 +80,23 @@ class ClusteringWorker(QThread):
             self.progress.emit(25, f"Running {self.mode} clustering (this may take a while)...")
             
             if self.mode == "linclust":
-                cmd_cluster = f'mmseqs linclust "{db_tool}" "{clu_tool}" "{tmp_tool}"'
+                cmd_cluster = ["linclust", db_tool, clu_tool, tmp_tool]
                 if self.kmer_per_seq:
-                    cmd_cluster += f' --kmer-per-seq {self.kmer_per_seq}'
+                    cmd_cluster.extend(["--kmer-per-seq", str(self.kmer_per_seq)])
             else:
-                cmd_cluster = f'mmseqs cluster "{db_tool}" "{clu_tool}" "{tmp_tool}"'
+                cmd_cluster = ["cluster", db_tool, clu_tool, tmp_tool]
                 if self.single_step:
-                    cmd_cluster += ' --single-step-clustering'
+                    cmd_cluster.append("--single-step-clustering")
             
-            cmd_cluster += f' --min-seq-id {self.min_seq_id}'
-            cmd_cluster += f' -c {self.coverage}'
-            cmd_cluster += f' --cov-mode {self.cov_mode}'
-            cmd_cluster += f' -e {self.evalue}'
+            cmd_cluster.extend(["--min-seq-id", str(self.min_seq_id)])
+            cmd_cluster.extend(["-c", str(self.coverage)])
+            cmd_cluster.extend(["--cov-mode", str(self.cov_mode)])
+            cmd_cluster.extend(["-e", str(self.evalue)])
             
             if self.sensitivity is not None:
-                cmd_cluster += f' -s {self.sensitivity}'
+                cmd_cluster.extend(["-s", str(self.sensitivity)])
             
-            result = run_wsl_command(cmd_cluster, timeout=1800)
+            result = runtime.run_resolved(resolution, cmd_cluster, timeout=1800)
             
             if result.returncode != 0:
                 self.error.emit(f"Clustering error:\n{result.stderr}\n\nStdout:\n{result.stdout}")
@@ -100,8 +109,11 @@ class ClusteringWorker(QThread):
             
             # Step 3: Create TSV (60-75%)
             self.progress.emit(65, "Extracting clustering results to TSV format...")
-            cmd_createtsv = f'mmseqs createtsv "{db_tool}" "{db_tool}" "{clu_tool}" "{tsv_tool}"'
-            result = run_wsl_command(cmd_createtsv, timeout=300)
+            result = runtime.run_resolved(
+                resolution,
+                ["createtsv", db_tool, db_tool, clu_tool, tsv_tool],
+                timeout=300,
+            )
             
             if result.returncode != 0:
                 self.error.emit(f"Error creating TSV:\n{result.stderr}")
@@ -114,8 +126,11 @@ class ClusteringWorker(QThread):
             
             # Step 4: Create representative database (75-85%)
             self.progress.emit(80, "Extracting representative sequences...")
-            cmd_createsubdb = f'mmseqs createsubdb "{clu_tool}" "{db_tool}" "{rep_db_tool}"'
-            result = run_wsl_command(cmd_createsubdb, timeout=300)
+            result = runtime.run_resolved(
+                resolution,
+                ["createsubdb", clu_tool, db_tool, rep_db_tool],
+                timeout=300,
+            )
             
             if result.returncode != 0:
                 self.error.emit(f"Error creating representative database:\n{result.stderr}")
@@ -128,8 +143,11 @@ class ClusteringWorker(QThread):
             
             # Step 5: Convert to FASTA (85-95%)
             self.progress.emit(90, "Converting representatives to FASTA format...")
-            cmd_convert2fasta = f'mmseqs convert2fasta "{rep_db_tool}" "{rep_fasta_tool}"'
-            result = run_wsl_command(cmd_convert2fasta, timeout=300)
+            result = runtime.run_resolved(
+                resolution,
+                ["convert2fasta", rep_db_tool, rep_fasta_tool],
+                timeout=300,
+            )
             
             if result.returncode != 0:
                 self.error.emit(f"Error converting to FASTA:\n{result.stderr}")
@@ -160,7 +178,7 @@ class ClusteringWorker(QThread):
             
         except subprocess.TimeoutExpired:
             self.error.emit("Clustering operation timed out. Please try with a smaller dataset or adjust parameters.")
-        except WSLError as e:
+        except (WSLError, ToolRuntimeError) as e:
             self.error.emit(f"Execution error: {str(e)}")
         except Exception as e:
             import traceback

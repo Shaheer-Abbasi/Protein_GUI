@@ -5,7 +5,8 @@ import os
 import shutil
 from PyQt5.QtCore import QThread, pyqtSignal
 
-from core.wsl_utils import run_wsl_command, convert_path_for_tool, WSLError
+from core.tool_runtime import ToolRuntimeError, get_tool_runtime
+from core.wsl_utils import WSLError
 from utils.results_parser import MMSeqsResultsParser
 
 
@@ -23,15 +24,21 @@ class MMseqsWorker(QThread):
     def run(self):
         try:
             temp_dir = tempfile.mkdtemp(prefix='mmseqs_search_')
+            runtime = get_tool_runtime()
+            resolution = runtime.resolve_tool("mmseqs")
+            if not resolution.executable:
+                self.error.emit("MMseqs2 is not available. Install it from the app or configure a valid executable path.")
+                shutil.rmtree(temp_dir, ignore_errors=True)
+                return
             
             query_fasta = os.path.join(temp_dir, 'query.fasta')
             with open(query_fasta, 'w') as f:
                 f.write(f">query\n{self.sequence}\n")
             
             # Convert paths for the tool execution environment
-            temp_dir_tool = convert_path_for_tool(temp_dir)
-            query_fasta_tool = convert_path_for_tool(query_fasta)
-            database_tool = convert_path_for_tool(self.database_path)
+            temp_dir_tool = runtime.prepare_path(resolution, temp_dir)
+            query_fasta_tool = runtime.prepare_path(resolution, query_fasta)
+            database_tool = runtime.prepare_path(resolution, self.database_path)
             
             query_db_tool = f"{temp_dir_tool}/queryDB"
             result_db_tool = f"{temp_dir_tool}/resultDB"
@@ -42,8 +49,11 @@ class MMseqsWorker(QThread):
             os.makedirs(tmp_folder, exist_ok=True)
             
             # Step 1: Create query database
-            cmd_createdb = f'mmseqs createdb "{query_fasta_tool}" "{query_db_tool}"'
-            result = run_wsl_command(cmd_createdb, timeout=60)
+            result = runtime.run_resolved(
+                resolution,
+                ["createdb", query_fasta_tool, query_db_tool],
+                timeout=60,
+            )
             
             if result.returncode != 0:
                 self.error.emit(f"Error creating query database:\n{result.stderr}")
@@ -52,9 +62,11 @@ class MMseqsWorker(QThread):
             
             # Step 2: Run search
             sensitivity_value = self.get_sensitivity_value()
-            cmd_search = f'mmseqs search "{query_db_tool}" "{database_tool}" "{result_db_tool}" "{tmp_folder_tool}" -s {sensitivity_value}'
-            
-            result = run_wsl_command(cmd_search, timeout=300)
+            result = runtime.run_resolved(
+                resolution,
+                ["search", query_db_tool, database_tool, result_db_tool, tmp_folder_tool, "-s", sensitivity_value],
+                timeout=300,
+            )
             
             if result.returncode != 0:
                 self.error.emit(f"MMseqs2 search error:\n{result.stderr}\n\nStdout:\n{result.stdout}")
@@ -62,9 +74,19 @@ class MMseqsWorker(QThread):
                 return
             
             # Step 3: Convert results to readable format
-            cmd_convertalis = f'mmseqs convertalis "{query_db_tool}" "{database_tool}" "{result_db_tool}" "{output_file_tool}" --format-output "query,target,theader,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits"'
-            
-            result = run_wsl_command(cmd_convertalis, timeout=60)
+            result = runtime.run_resolved(
+                resolution,
+                [
+                    "convertalis",
+                    query_db_tool,
+                    database_tool,
+                    result_db_tool,
+                    output_file_tool,
+                    "--format-output",
+                    "query,target,theader,pident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits",
+                ],
+                timeout=60,
+            )
             
             if result.returncode != 0:
                 self.error.emit(f"Error converting results:\n{result.stderr}")
@@ -83,7 +105,7 @@ class MMseqsWorker(QThread):
             
         except subprocess.TimeoutExpired:
             self.error.emit("MMseqs2 search timed out after 5 minutes.")
-        except WSLError as e:
+        except (WSLError, ToolRuntimeError) as e:
             self.error.emit(f"Execution error: {str(e)}")
         except Exception as e:
             import traceback

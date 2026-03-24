@@ -10,11 +10,14 @@ class TestConfigManager:
         cm = ConfigManager(config_path=sample_config)
         assert cm.get("blast_path") == "blastp"
         assert cm.get("mmseqs_available") is True
+        assert cm.get("managed_env_name") == "bio-tools"
 
     def test_defaults_when_no_file(self, tmp_path):
         cm = ConfigManager(config_path=str(tmp_path / "nonexistent.json"))
         assert cm.get("blast_path") == "blastp"
         assert cm.get("mmseqs_available") is False
+        assert cm.get("tool_backend_preference") == "managed"
+        assert cm.get("managed_env_name") == "bio-tools"
 
     def test_get_with_default(self, tmp_path):
         cm = ConfigManager(config_path=str(tmp_path / "nonexistent.json"))
@@ -70,3 +73,11 @@ class TestConfigManager:
         config_path.write_text("{invalid json!!")
         cm = ConfigManager(config_path=str(config_path))
         assert cm.get("blast_path") == "blastp"
+
+    def test_existing_config_gets_new_defaults_merged(self, tmp_path):
+        config_path = tmp_path / "config.json"
+        config_path.write_text(json.dumps({"blast_path": "/custom/blastp"}))
+        cm = ConfigManager(config_path=str(config_path))
+        assert cm.get("blast_path") == "/custom/blastp"
+        assert cm.get("managed_env_name") == "bio-tools"
+        assert cm.get("tool_source_overrides") == {}

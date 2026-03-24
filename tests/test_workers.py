@@ -4,33 +4,35 @@ import tempfile
 from unittest.mock import patch, MagicMock, call
 import pytest
 
+from core.blast_worker import BLASTWorker
 from core.alignment_worker import check_clustalo_installation, AlignmentWorker, SequenceAlignmentPrep
 
 
 # ── check_clustalo_installation ──────────────────────────────────────
 
 class TestCheckClustaloInstallation:
-    @patch("core.alignment_worker.is_windows", return_value=False)
-    @patch("core.alignment_worker.check_wsl_command", return_value=(True, "/usr/local/bin/clustalo"))
-    @patch("core.alignment_worker.run_wsl_command")
-    def test_found(self, mock_run, *_):
-        mock_run.return_value = MagicMock(returncode=0, stdout="1.2.4\n")
+    @patch("core.alignment_worker.get_tool_runtime")
+    def test_found(self, mock_runtime):
+        mock_runtime.return_value.get_tool_status.return_value = MagicMock(
+            installed=True,
+            version="1.2.4",
+            executable_path="/usr/local/bin/clustalo",
+        )
         installed, version, path = check_clustalo_installation()
         assert installed is True
         assert version == "1.2.4"
+        assert path == "/usr/local/bin/clustalo"
 
-    @patch("core.alignment_worker.is_windows", return_value=False)
-    @patch("core.alignment_worker.check_wsl_command", return_value=(False, None))
-    def test_not_found(self, *_):
+    @patch("core.alignment_worker.get_tool_runtime")
+    def test_not_found(self, mock_runtime):
+        mock_runtime.return_value.get_tool_status.return_value = MagicMock(
+            installed=False,
+            version=None,
+            executable_path=None,
+        )
         installed, version, path = check_clustalo_installation()
         assert installed is False
         assert version is None
-
-    @patch("core.alignment_worker.is_windows", return_value=True)
-    @patch("core.alignment_worker.is_wsl_available", return_value=False)
-    def test_no_wsl_on_windows(self, *_):
-        installed, version, path = check_clustalo_installation()
-        assert installed is False
 
 
 # ── SequenceAlignmentPrep ────────────────────────────────────────────
@@ -121,3 +123,33 @@ class TestMMseqsWorkerParams:
         assert w.get_identity_color("95") == "#27ae60"
         assert w.get_identity_color("20") == "#e74c3c"
         assert w.get_identity_color("bad") == "#7f8c8d"
+
+
+class TestRuntimeIntegratedWorkers:
+    @patch("core.blast_worker.BLASTResultsParser.parse_xml", return_value=[])
+    @patch.object(BLASTWorker, "parse_blast_xml", return_value="<html></html>")
+    @patch("core.blast_worker.get_tool_runtime")
+    @patch("core.blast_worker.os.unlink")
+    def test_blast_worker_routes_execution_through_runtime(
+        self,
+        mock_unlink,
+        mock_runtime_factory,
+        _mock_parse_html,
+        _mock_parse_structured,
+    ):
+        runtime = MagicMock()
+        resolution = MagicMock(executable="/managed/blastp", backend="native")
+        runtime.resolve_tool.return_value = resolution
+        runtime.prepare_path.side_effect = lambda _resolution, path: path
+        runtime.run_resolved.return_value = MagicMock(returncode=0, stdout="", stderr="")
+        mock_runtime_factory.return_value = runtime
+
+        worker = BLASTWorker("MVHLTPEEKSAVTAL", "swissprot", use_remote=True)
+        finished_payload = []
+        worker.finished.connect(lambda html, data: finished_payload.append((html, data)))
+
+        worker.run()
+
+        runtime.resolve_tool.assert_called_once_with("blastp")
+        assert runtime.run_resolved.called
+        assert finished_payload == [("<html></html>", [])]

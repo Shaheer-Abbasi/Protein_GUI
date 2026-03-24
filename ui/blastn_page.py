@@ -16,6 +16,8 @@ from ui.widgets.results_panel import SearchResultsPanel
 from core.db_definitions import NUCLEOTIDE_DATABASES
 from core.blastn_worker import BLASTNWorker
 from core.config_manager import get_config
+from core.tool_install_worker import ToolInstallWorker
+from core.tool_runtime import get_tool_runtime
 from utils.fasta_parser import FastaParser, FastaParseError
 from utils.export_manager import ResultsExporter, ExportError, show_export_error, show_export_success
 from ui.dialogs.nucleotide_search_dialog import NucleotideSearchDialog
@@ -43,6 +45,8 @@ class BLASTNPage(QWidget):
         self.exporter = ResultsExporter()
         self.loaded_sequences = []
         self.current_sequence_metadata = {}
+        self.tool_install_worker = None
+        self._pending_tool_action = None
         self._init_ui()
 
     def _init_ui(self):
@@ -480,7 +484,61 @@ class BLASTNPage(QWidget):
 
     # ── Run BLASTN ────────────────────────────────────────────────
 
+    def _ensure_blastn_tools(self):
+        runtime = get_tool_runtime()
+        missing = runtime.get_missing_tools_for_feature("blastn")
+        if not missing:
+            return True
+
+        installable = runtime.get_installable_tools(missing)
+        if installable:
+            reply = QMessageBox.question(
+                self,
+                "Install Required Tools",
+                "BLASTN requires BLAST+.\n\nInstall it now?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return False
+
+            self._pending_tool_action = self.run_blast
+            self.process_button.setEnabled(False)
+            self.status_label.setText("Installing required tools...")
+            self.tool_install_worker = ToolInstallWorker(installable)
+            self.tool_install_worker.progress.connect(
+                lambda current, total, status: self.status_label.setText(status)
+            )
+            self.tool_install_worker.finished.connect(self._on_tool_install_finished)
+            self.tool_install_worker.error.connect(self._on_tool_install_error)
+            self.tool_install_worker.start()
+            return False
+
+        QMessageBox.warning(
+            self,
+            "BLAST+ Missing",
+            "BLASTN requires BLAST+ and it is not currently available on this system.",
+        )
+        return False
+
+    def _on_tool_install_finished(self, _result):
+        self.tool_install_worker = None
+        self.process_button.setEnabled(True)
+        self.status_label.setText("Required tools installed.")
+        pending = self._pending_tool_action
+        self._pending_tool_action = None
+        if pending is not None:
+            pending()
+
+    def _on_tool_install_error(self, error_msg: str):
+        self.tool_install_worker = None
+        self.process_button.setEnabled(True)
+        self._pending_tool_action = None
+        self.status_label.setText("Tool installation failed.")
+        QMessageBox.critical(self, "Tool Install Error", error_msg)
+
     def run_blast(self):
+        if not self._ensure_blastn_tools():
+            return
         sequence = self.input_text.toPlainText().strip().upper()
         if not sequence:
             self.status_label.setText("Please enter a nucleotide sequence first.")

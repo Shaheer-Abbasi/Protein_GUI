@@ -5,6 +5,7 @@ import os
 from PyQt5.QtCore import QThread, pyqtSignal
 from Bio.Blast import NCBIXML
 from core.config_manager import get_config
+from core.tool_runtime import get_tool_runtime
 from utils.results_parser import BLASTResultsParser
 
 
@@ -64,16 +65,22 @@ class BLASTNWorker(QThread):
             
             output_path = tempfile.mktemp(suffix='.xml')
             
-            # Get BLASTN path from config
+            # Resolve BLASTN through the shared runtime layer.
             config = get_config()
-            blastn_path = config.get_blastn_path()
+            runtime = get_tool_runtime()
+            blastn_resolution = runtime.resolve_tool("blastn")
+            if not blastn_resolution.executable:
+                self.error.emit("BLASTN is not available. Install BLAST+ or configure a valid executable path.")
+                return
+
+            query_path_tool = runtime.prepare_path(blastn_resolution, query_path)
+            output_path_tool = runtime.prepare_path(blastn_resolution, output_path)
             
             # Build command
             cmd = [
-                blastn_path,
-                '-query', query_path,
+                '-query', query_path_tool,
                 '-outfmt', '5',  # XML format for Biopython parsing
-                '-out', output_path,
+                '-out', output_path_tool,
                 '-task', self.params['task'],
                 '-evalue', str(self.params['evalue']),
                 '-max_target_seqs', str(self.params['max_target_seqs']),
@@ -105,7 +112,7 @@ class BLASTNWorker(QThread):
                     blast_db_dir = config.get_blast_db_dir()
                     local_db = os.path.join(blast_db_dir, self.database)
                 
-                cmd.extend(['-db', local_db])
+                cmd.extend(['-db', runtime.prepare_path(blastn_resolution, local_db)])
                 timeout = self.LOCAL_TIMEOUT
             
             # Check if cancelled before starting
@@ -115,44 +122,58 @@ class BLASTNWorker(QThread):
             # Execute BLASTN with timeout
             self.progress.emit("Starting BLAST search...")
             try:
-                self._process = subprocess.Popen(
-                    cmd,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                
-                try:
-                    stdout, stderr = self._process.communicate(timeout=timeout)
-                except subprocess.TimeoutExpired:
-                    self._process.kill()
-                    self._process.communicate()
-                    self.error.emit(
-                        f"Search timed out after {timeout // 60} minutes.\n\n"
-                        "Remote NCBI BLAST searches can take a very long time for large databases.\n\n"
-                        "Try:\n"
-                        "• Using a smaller database (e.g., refseq_rna instead of nt)\n"
-                        "• Reducing the sequence length\n"
-                        "• Using megablast algorithm for faster (but less sensitive) search"
+                if blastn_resolution.backend == "wsl":
+                    result = runtime.run_resolved(blastn_resolution, cmd, timeout=timeout)
+                    stdout, stderr = result.stdout, result.stderr
+                    return_code = result.returncode
+                else:
+                    self._process = subprocess.Popen(
+                        [blastn_resolution.executable, *cmd],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
                     )
-                    # Cleanup temp files
+
+                    try:
+                        stdout, stderr = self._process.communicate(timeout=timeout)
+                    except subprocess.TimeoutExpired:
+                        self._process.kill()
+                        self._process.communicate()
+                        self.error.emit(
+                            f"Search timed out after {timeout // 60} minutes.\n\n"
+                            "Remote NCBI BLAST searches can take a very long time for large databases.\n\n"
+                            "Try:\n"
+                            "• Using a smaller database (e.g., refseq_rna instead of nt)\n"
+                            "• Reducing the sequence length\n"
+                            "• Using megablast algorithm for faster (but less sensitive) search"
+                        )
+                        # Cleanup temp files
+                        try:
+                            os.unlink(query_path)
+                        except:
+                            pass
+                        return
+                    return_code = self._process.returncode
+
+                if blastn_resolution.backend == "wsl" and self._cancelled:
                     try:
                         os.unlink(query_path)
                     except:
                         pass
                     return
-                
-                if self._cancelled:
-                    # Cleanup and exit
-                    try:
-                        os.unlink(query_path)
-                    except:
-                        pass
-                    return
-                
-                if self._process.returncode != 0:
-                    raise subprocess.CalledProcessError(self._process.returncode, cmd, stdout, stderr)
-                    
+
+                if blastn_resolution.backend != "wsl":
+                    if self._cancelled:
+                        # Cleanup and exit
+                        try:
+                            os.unlink(query_path)
+                        except:
+                            pass
+                        return
+
+                if return_code != 0:
+                    raise subprocess.CalledProcessError(return_code, cmd, stdout, stderr)
+
             except subprocess.CalledProcessError as e:
                 raise e
             
