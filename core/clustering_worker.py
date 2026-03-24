@@ -93,7 +93,7 @@ class ClusteringWorker(QThread):
             cmd_cluster.extend(["--cov-mode", str(self.cov_mode)])
             cmd_cluster.extend(["-e", str(self.evalue)])
             
-            if self.sensitivity is not None:
+            if self.sensitivity is not None and self.mode != "linclust":
                 cmd_cluster.extend(["-s", str(self.sensitivity)])
             
             result = runtime.run_resolved(resolution, cmd_cluster, timeout=1800)

@@ -13,7 +13,11 @@ from PyQt5.QtGui import QFont
 from ui.theme import get_theme
 from ui.icons import feather_icon, set_button_icon
 from ui.widgets.results_panel import SearchResultsPanel
-from core.db_definitions import NUCLEOTIDE_DATABASES
+from core.db_definitions import (
+    get_blastn_databases,
+    get_default_blastn_database,
+    is_remote_blastn_database_supported,
+)
 from core.blastn_worker import BLASTNWorker
 from core.config_manager import get_config
 from core.tool_install_worker import ToolInstallWorker
@@ -156,23 +160,19 @@ class BLASTNPage(QWidget):
 
         db_sel = QVBoxLayout()
         self.db_combo = QComboBox()
-        key_dbs = ['nt', 'refseq_rna', 'refseq_genomic', 'est', '16S_ribosomal_RNA']
-        for db in key_dbs:
-            if db in NUCLEOTIDE_DATABASES:
-                self.db_combo.addItem(f"{db} - {NUCLEOTIDE_DATABASES[db]}")
-        for db, desc in NUCLEOTIDE_DATABASES.items():
-            if db not in key_dbs:
-                self.db_combo.addItem(f"{db} - {desc}")
-        self.db_combo.setCurrentIndex(0)
         self.db_combo.currentTextChanged.connect(self.on_database_changed)
 
         self.db_description = QLabel()
         self.db_description.setWordWrap(True)
         self.db_description.setProperty("class", "muted")
-        self.update_database_description()
+
+        self.db_mode_hint = QLabel()
+        self.db_mode_hint.setWordWrap(True)
+        self.db_mode_hint.setProperty("class", "muted")
 
         db_sel.addWidget(self.db_combo)
         db_sel.addWidget(self.db_description)
+        db_sel.addWidget(self.db_mode_hint)
 
         local_row = QHBoxLayout()
         self.local_db_label = QLabel("Local DB Path:")
@@ -190,6 +190,7 @@ class BLASTNPage(QWidget):
         dg.addLayout(db_sel)
         dg.addLayout(local_row)
         db_group.setLayout(dg)
+        self._populate_database_combo()
         self.on_database_source_changed()
         form.addWidget(db_group)
 
@@ -447,14 +448,43 @@ class BLASTNPage(QWidget):
     def update_database_description(self):
         text = self.db_combo.currentText()
         db = text.split(' - ')[0] if ' - ' in text else text
-        desc = NUCLEOTIDE_DATABASES.get(db, "Database information not available")
+        desc = get_blastn_databases(self.remote_radio.isChecked()).get(
+            db, "Database information not available"
+        )
         self.db_description.setText(desc)
+
+    def _populate_database_combo(self):
+        use_remote = self.remote_radio.isChecked()
+        databases = get_blastn_databases(use_remote)
+        current_db = self.db_combo.currentData()
+
+        self.db_combo.blockSignals(True)
+        self.db_combo.clear()
+        for db, desc in databases.items():
+            self.db_combo.addItem(f"{db} - {desc}", db)
+
+        target_db = current_db if current_db in databases else get_default_blastn_database(use_remote)
+        index = self.db_combo.findData(target_db)
+        if index >= 0:
+            self.db_combo.setCurrentIndex(index)
+        self.db_combo.blockSignals(False)
+        self.update_database_description()
 
     def on_database_source_changed(self):
         remote = self.remote_radio.isChecked()
+        self._populate_database_combo()
         self.local_db_label.setEnabled(not remote)
         self.local_db_path.setEnabled(not remote)
         self.browse_button.setEnabled(not remote)
+        if remote:
+            self.db_mode_hint.setText(
+                "Remote BLASTN is slower and supports a smaller database list. "
+                "For the best chance of a timely result, start with core_nt or use a local database."
+            )
+        else:
+            self.db_mode_hint.setText(
+                "Local BLASTN supports the full installed database set and is recommended for repeat searches."
+            )
 
     def browse_database_path(self):
         d = QFileDialog.getExistingDirectory(self, "Select Database Directory", "",
@@ -550,15 +580,23 @@ class BLASTNPage(QWidget):
                 f"Invalid sequence: found characters {', '.join(sorted(invalid_chars))}")
             return
 
+        db_text = self.db_combo.currentText()
+        database = self.db_combo.currentData() or (db_text.split(' - ')[0] if ' - ' in db_text else db_text)
+        use_remote = self.remote_radio.isChecked()
+        if use_remote and not is_remote_blastn_database_supported(database):
+            self.status_label.setText(
+                "That database is not supported for remote BLASTN. Choose a supported remote database or use local mode."
+            )
+            return
+
         self.process_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.cancel_button.show()
-        self.status_label.setText("Running BLASTN search... This may take several minutes.")
+        if use_remote:
+            self.status_label.setText("Running remote BLASTN search... This may take several minutes.")
+        else:
+            self.status_label.setText("Running local BLASTN search...")
         self.results_panel.clear()
-
-        db_text = self.db_combo.currentText()
-        database = db_text.split(' - ')[0] if ' - ' in db_text else db_text
-        use_remote = self.remote_radio.isChecked()
         local_path = self.local_db_path.text().strip()
 
         self.search_start_time = time.time()

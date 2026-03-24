@@ -5,6 +5,7 @@ from unittest.mock import patch, MagicMock, call
 import pytest
 
 from core.blast_worker import BLASTWorker
+from core.blastn_worker import BLASTNWorker
 from core.alignment_worker import check_clustalo_installation, AlignmentWorker, SequenceAlignmentPrep
 
 
@@ -153,3 +154,13 @@ class TestRuntimeIntegratedWorkers:
         runtime.resolve_tool.assert_called_once_with("blastp")
         assert runtime.run_resolved.called
         assert finished_payload == [("<html></html>", [])]
+
+    def test_blastn_worker_rejects_unsupported_remote_database(self):
+        worker = BLASTNWorker("ATGCATGCATGC", "16S_ribosomal_RNA", use_remote=True)
+        errors = []
+        worker.error.connect(errors.append)
+
+        worker.run()
+
+        assert errors
+        assert "Remote BLASTN does not support" in errors[0]

@@ -41,7 +41,6 @@ class AlignmentPage(QWidget):
         self._pending_tool_action = None
         self._init_ui()
 
-        QTimer.singleShot(100, lambda: warmup_wsl())
         QTimer.singleShot(2000, self.check_system_requirements)
 
     def _init_ui(self):
