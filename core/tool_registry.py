@@ -1,0 +1,143 @@
+"""Registry for managed bioinformatics tools.
+
+Managed micromamba installs target macOS and Linux. Windows currently falls
+back to WSL/system tooling because the relevant bioconda packages are not
+consistently available there, especially for MMseqs2.
+"""
+
+from dataclasses import dataclass
+import platform
+import sys
+from typing import Dict, Tuple
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """Static metadata describing a tool and how the app should manage it."""
+
+    id: str
+    display_name: str
+    package_name: str
+    channels: Tuple[str, ...]
+    executables: Tuple[str, ...]
+    feature_labels: Tuple[str, ...]
+    version_args: Tuple[str, ...]
+    managed_platforms: Tuple[str, ...] = ("darwin", "linux")
+    windows_fallback: str | None = "wsl"
+
+
+TOOLS: Dict[str, ToolSpec] = {
+    "blastp": ToolSpec(
+        id="blastp",
+        display_name="BLASTP",
+        package_name="blast",
+        channels=("bioconda",),
+        executables=("blastp",),
+        feature_labels=("protein_blast",),
+        version_args=("-version",),
+    ),
+    "blastn": ToolSpec(
+        id="blastn",
+        display_name="BLASTN",
+        package_name="blast",
+        channels=("bioconda",),
+        executables=("blastn",),
+        feature_labels=("blastn",),
+        version_args=("-version",),
+    ),
+    "blastdbcmd": ToolSpec(
+        id="blastdbcmd",
+        display_name="blastdbcmd",
+        package_name="blast",
+        channels=("bioconda",),
+        executables=("blastdbcmd",),
+        feature_labels=("database_conversion", "protein_mmseqs"),
+        version_args=("-version",),
+    ),
+    "mmseqs": ToolSpec(
+        id="mmseqs",
+        display_name="MMseqs2",
+        package_name="mmseqs2",
+        channels=("conda-forge", "bioconda"),
+        executables=("mmseqs",),
+        feature_labels=("protein_mmseqs", "clustering", "database_conversion"),
+        version_args=("version",),
+    ),
+    "clustalo": ToolSpec(
+        id="clustalo",
+        display_name="Clustal Omega",
+        package_name="clustalo",
+        channels=("bioconda",),
+        executables=("clustalo",),
+        feature_labels=("alignment",),
+        version_args=("--version",),
+    ),
+}
+
+
+FEATURE_TOOLS: Dict[str, Tuple[str, ...]] = {
+    "protein_blast": ("blastp",),
+    "protein_mmseqs": ("mmseqs", "blastdbcmd"),
+    "protein_mmseqs_existing_db": ("mmseqs",),
+    "blastn": ("blastn",),
+    "alignment": ("clustalo",),
+    "clustering": ("mmseqs",),
+    "database_conversion": ("blastdbcmd", "mmseqs"),
+}
+
+
+def get_tool_spec(tool_id: str) -> ToolSpec:
+    """Return the static metadata for a known tool."""
+
+    if tool_id not in TOOLS:
+        raise KeyError(f"Unknown tool id: {tool_id}")
+    return TOOLS[tool_id]
+
+
+def get_tools_for_feature(feature_id: str) -> Tuple[str, ...]:
+    """Return the tools required by a higher-level feature."""
+
+    return FEATURE_TOOLS.get(feature_id, ())
+
+
+def current_platform_key() -> str:
+    """Return a normalized platform key used by runtime policy."""
+
+    if sys.platform == "win32":
+        return "windows"
+    if sys.platform == "darwin":
+        return "darwin"
+    return "linux"
+
+
+def is_managed_install_supported(tool_id: str) -> bool:
+    """Whether the current platform supports app-managed micromamba installs."""
+
+    spec = get_tool_spec(tool_id)
+    platform_key = current_platform_key()
+    if platform_key == "windows":
+        return False
+    return platform_key in spec.managed_platforms
+
+
+def get_windows_backend_policy() -> Dict[str, str]:
+    """Return the current Windows policy for managed/runtime backends."""
+
+    return {
+        "blastp": "wsl",
+        "blastn": "wsl",
+        "blastdbcmd": "wsl",
+        "mmseqs": "wsl",
+        "clustalo": "wsl",
+    }
+
+
+def micromamba_platform_subdir() -> str:
+    """Return the micromamba platform tag for this machine."""
+
+    machine = platform.machine().lower()
+    if sys.platform == "darwin":
+        return "osx-arm64" if machine in {"arm64", "aarch64"} else "osx-64"
+    if sys.platform == "win32":
+        return "win-64"
+    return "linux-aarch64" if machine in {"arm64", "aarch64"} else "linux-64"
