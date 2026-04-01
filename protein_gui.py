@@ -186,6 +186,10 @@ class ProteinGUI(QMainWindow):
             self.blastn_page.blast_worker,
             self.database_downloads_page.current_worker,
             self.motif_search_page.search_worker,
+            self.alignment_page._sca_worker,
+            self.alignment_page._pysca_install_worker,
+            self.alignment_page._pysca_run_worker,
+            self.alignment_page._pysca_export_worker,
         ]
         for w in workers:
             if w is None or not w.isRunning():

@@ -1,13 +1,16 @@
 """Sequence Alignment page - Multiple sequence alignment (several backends)."""
 import os
+import platform
 import shutil
+import subprocess
 import tempfile
 import time
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QLineEdit, QComboBox, QGroupBox, QTextEdit,
     QProgressBar, QMessageBox, QTabWidget, QRadioButton, QButtonGroup,
-    QFrame, QSpinBox, QCheckBox, QSplitter, QScrollArea, QSizePolicy
+    QFrame, QSpinBox, QCheckBox, QSplitter, QScrollArea, QSizePolicy,
+    QDoubleSpinBox,
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QSettings
 
@@ -24,6 +27,11 @@ from core.alignment_worker import (
     max_sequences_for_tool,
 )
 from ui.dialogs.alignment_viewer_dialog import AlignmentViewerDialog
+from core.array_backend import gpu_available, gpu_device_name, set_gpu_enabled
+from core.sca_worker import SCAWorker
+from core.pysca_manager import is_pysca_installed, check_pairwise_aligner, PySCAParams
+from core.pysca_worker import PySCAInstallWorker, PySCARunWorker, PySCAExportWorker
+from ui.widgets.sca_plots_widget import SCAChartsWidget, SCAChartsDialog
 
 
 class AlignmentPage(QWidget):
@@ -47,7 +55,12 @@ class AlignmentPage(QWidget):
         self._align_t0 = None
         self._align_status_base = ""
         self._viewer_dialog = None
+        self._sca_charts_dialog = None
         self._alignment_output_format = None
+        self._sca_worker = None
+        self._pysca_install_worker = None
+        self._pysca_run_worker = None
+        self._pysca_export_worker = None
         self._init_ui()
 
         QTimer.singleShot(2000, self.check_system_requirements)
@@ -291,6 +304,145 @@ class AlignmentPage(QWidget):
         self.raw_alignment_text.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         rl.addWidget(self.raw_alignment_text)
         self.results_tabs.addTab(raw_tab, feather_icon("file-text", 16), "Raw Alignment")
+
+        # Tab 2: SCA Analysis (scrollable)
+        sca_scroll = QScrollArea()
+        sca_scroll.setWidgetResizable(True)
+        sca_scroll.setFrameShape(QFrame.NoFrame)
+        sca_tab = QWidget()
+        sca_layout = QVBoxLayout(sca_tab)
+        sca_layout.setContentsMargins(12, 12, 12, 12)
+        sca_layout.setSpacing(10)
+        sca_scroll.setWidget(sca_tab)
+
+        # ── Section A: Built-in SCA (Tier 1) ──
+        tier1_group = QGroupBox("Built-in SCA Analysis")
+        tier1_layout = QVBoxLayout()
+
+        sca_ctrl_row = QHBoxLayout()
+        self.sca_run_btn = QPushButton("Run Quick SCA")
+        self.sca_run_btn.setProperty("class", "success")
+        set_button_icon(self.sca_run_btn, "play", 14, "#FFFFFF")
+        self.sca_run_btn.clicked.connect(self._run_builtin_sca)
+        sca_ctrl_row.addWidget(self.sca_run_btn)
+
+        self.sca_popout_btn = QPushButton("Pop Out Charts")
+        set_button_icon(self.sca_popout_btn, "external-link", 14)
+        self.sca_popout_btn.setEnabled(False)
+        self.sca_popout_btn.clicked.connect(self._pop_out_sca_charts)
+        sca_ctrl_row.addWidget(self.sca_popout_btn)
+
+        if gpu_available():
+            self.sca_gpu_check = QCheckBox(f"GPU Accelerated ({gpu_device_name()})")
+            self.sca_gpu_check.setChecked(True)
+            self.sca_gpu_check.toggled.connect(lambda on: set_gpu_enabled(on))
+            sca_ctrl_row.addWidget(self.sca_gpu_check)
+        else:
+            self.sca_gpu_check = None
+
+        self.sca_status_label = QLabel("")
+        self.sca_status_label.setProperty("class", "muted")
+        sca_ctrl_row.addWidget(self.sca_status_label, 1)
+        tier1_layout.addLayout(sca_ctrl_row)
+
+        self.sca_progress = QProgressBar()
+        self.sca_progress.setTextVisible(True)
+        self.sca_progress.hide()
+        tier1_layout.addWidget(self.sca_progress)
+
+        self.sca_charts = SCAChartsWidget()
+        self.sca_charts.setMinimumHeight(500)
+        tier1_layout.addWidget(self.sca_charts, 1)
+
+        tier1_group.setLayout(tier1_layout)
+        sca_layout.addWidget(tier1_group, 1)
+
+        # ── Section B: Full pySCA (Tier 2) ──
+        tier2_group = QGroupBox("Full pySCA Analysis (Ranganathan Lab)")
+        tier2_layout = QVBoxLayout()
+
+        # Status row
+        pysca_status_row = QHBoxLayout()
+        self.pysca_status_label = QLabel()
+        self.pysca_status_label.setProperty("class", "muted")
+        pysca_status_row.addWidget(self.pysca_status_label)
+
+        self.pysca_install_btn = QPushButton("Install pySCA")
+        self.pysca_install_btn.setProperty("class", "success")
+        self.pysca_install_btn.clicked.connect(self._install_pysca)
+        pysca_status_row.addWidget(self.pysca_install_btn)
+        pysca_status_row.addStretch()
+        tier2_layout.addLayout(pysca_status_row)
+
+        # Config row
+        cfg_row = QHBoxLayout()
+        cfg_row.addWidget(QLabel("PDB ID:"))
+        self.pysca_pdb_input = QLineEdit()
+        self.pysca_pdb_input.setPlaceholderText("e.g. 5P21 (optional)")
+        self.pysca_pdb_input.setMaximumWidth(120)
+        cfg_row.addWidget(self.pysca_pdb_input)
+        cfg_row.addWidget(QLabel("Chain:"))
+        self.pysca_chain_input = QLineEdit()
+        self.pysca_chain_input.setPlaceholderText("e.g. A")
+        self.pysca_chain_input.setMaximumWidth(60)
+        cfg_row.addWidget(self.pysca_chain_input)
+        cfg_row.addWidget(QLabel("Max gap %:"))
+        self.pysca_gap_spin = QDoubleSpinBox()
+        self.pysca_gap_spin.setRange(0.01, 1.0)
+        self.pysca_gap_spin.setValue(0.2)
+        self.pysca_gap_spin.setSingleStep(0.05)
+        self.pysca_gap_spin.setMaximumWidth(80)
+        cfg_row.addWidget(self.pysca_gap_spin)
+        cfg_row.addStretch()
+        tier2_layout.addLayout(cfg_row)
+
+        # Run + export row
+        pysca_ctrl_row = QHBoxLayout()
+        self.pysca_run_btn = QPushButton("Run Full pySCA")
+        self.pysca_run_btn.setProperty("class", "success")
+        set_button_icon(self.pysca_run_btn, "play", 14, "#FFFFFF")
+        self.pysca_run_btn.clicked.connect(self._run_full_pysca)
+        pysca_ctrl_row.addWidget(self.pysca_run_btn)
+
+        self.pysca_save_db_btn = QPushButton("Save .db file...")
+        self.pysca_save_db_btn.clicked.connect(self._save_pysca_db)
+        self.pysca_save_db_btn.setEnabled(False)
+        pysca_ctrl_row.addWidget(self.pysca_save_db_btn)
+
+        self.pysca_export_csv_btn = QPushButton("Export arrays as CSV...")
+        self.pysca_export_csv_btn.clicked.connect(self._export_pysca_csv)
+        self.pysca_export_csv_btn.setEnabled(False)
+        pysca_ctrl_row.addWidget(self.pysca_export_csv_btn)
+
+        self.pysca_open_folder_btn = QPushButton("Open output folder")
+        self.pysca_open_folder_btn.clicked.connect(self._open_pysca_folder)
+        self.pysca_open_folder_btn.setEnabled(False)
+        pysca_ctrl_row.addWidget(self.pysca_open_folder_btn)
+
+        pysca_ctrl_row.addStretch()
+        tier2_layout.addLayout(pysca_ctrl_row)
+
+        self.pysca_progress = QProgressBar()
+        self.pysca_progress.setTextVisible(False)
+        self.pysca_progress.setRange(0, 0)
+        self.pysca_progress.hide()
+        tier2_layout.addWidget(self.pysca_progress)
+
+        self.pysca_log = QTextEdit()
+        self.pysca_log.setReadOnly(True)
+        self.pysca_log.setProperty("class", "mono")
+        self.pysca_log.setMaximumHeight(150)
+        self.pysca_log.hide()
+        tier2_layout.addWidget(self.pysca_log)
+
+        tier2_group.setLayout(tier2_layout)
+        sca_layout.addWidget(tier2_group)
+
+        self.results_tabs.addTab(sca_scroll, feather_icon("bar-chart-2", 16), "SCA Analysis")
+
+        self._pysca_db_path = None
+        self._pysca_output_dir = None
+        self._refresh_pysca_status()
 
         # Tab 3: Export
         export_tab = QWidget()
@@ -639,6 +791,8 @@ class AlignmentPage(QWidget):
         self._results_panel.show()
         self.results_tabs.show()
 
+        self._refresh_pysca_status()
+
         # Pop-out viewer expects aligned FASTA; other formats stay in Raw / Export tabs.
         if self._alignment_output_format == "fasta":
             dlg = self._ensure_alignment_viewer_dialog()
@@ -646,6 +800,9 @@ class AlignmentPage(QWidget):
             dlg.show()
             dlg.raise_()
             dlg.activateWindow()
+
+            # Auto-run built-in SCA (silent -- no pop-ups if too few sequences)
+            self._run_builtin_sca(silent=True)
 
     def on_alignment_error(self, error_msg):
         self._stop_alignment_elapsed_timer()
@@ -708,6 +865,221 @@ class AlignmentPage(QWidget):
                 self.save_fasta_button.setVisible(False)
             except Exception as e:
                 QMessageBox.critical(self, "Save Error", f"Failed to save:\n{str(e)}")
+
+    # ── Built-in SCA (Tier 1) ────────────────────────────────────
+    def _pop_out_sca_charts(self):
+        """Open the SCA charts in a dedicated pop-out window."""
+        results = self.sca_charts.last_results()
+        if results is None:
+            return
+        if self._sca_charts_dialog is None:
+            self._sca_charts_dialog = SCAChartsDialog(self)
+        self._sca_charts_dialog.plot_results(results)
+        self._sca_charts_dialog.show()
+        self._sca_charts_dialog.raise_()
+        self._sca_charts_dialog.activateWindow()
+
+    def _run_builtin_sca(self, silent: bool = False):
+        if not self.aligned_content:
+            if not silent:
+                QMessageBox.information(self, "No alignment", "Run an alignment first.")
+            return
+        fmt = self._alignment_output_format or self.format_combo.currentData()
+        if fmt != "fasta":
+            if not silent:
+                QMessageBox.information(
+                    self, "SCA",
+                    "SCA requires aligned FASTA output.\n"
+                    "Re-run the alignment with output format \"FASTA (aligned)\".",
+                )
+            return
+        if self._sca_worker and self._sca_worker.isRunning():
+            self._sca_worker.cancel()
+            self._sca_worker.wait()
+
+        self.sca_run_btn.setEnabled(False)
+        self.sca_progress.setValue(0)
+        self.sca_progress.setRange(0, 100)
+        self.sca_progress.show()
+        self.sca_status_label.setText("Starting SCA...")
+        self.sca_charts.clear_plot()
+
+        self._sca_worker = SCAWorker(self.aligned_content)
+        self._sca_worker.progress.connect(self._on_sca_progress)
+        self._sca_worker.finished.connect(self._on_sca_finished)
+        self._sca_worker.error.connect(self._on_sca_error)
+        self._sca_worker.start()
+
+    def _on_sca_progress(self, pct, msg):
+        self.sca_progress.setValue(pct)
+        self.sca_status_label.setText(msg)
+
+    def _on_sca_finished(self, results):
+        self.sca_progress.hide()
+        self.sca_run_btn.setEnabled(True)
+        self.sca_popout_btn.setEnabled(True)
+        backend = "GPU" if results.used_gpu else "CPU"
+        self.sca_status_label.setText(
+            f"Computed in {results.elapsed_seconds:.1f}s ({backend}) — "
+            f"{results.n_seqs} sequences × {results.n_pos} positions, "
+            f"k={results.kpos} significant eigenmodes"
+        )
+        self.sca_charts.plot_results(results)
+        if self._sca_charts_dialog is not None and self._sca_charts_dialog.isVisible():
+            self._sca_charts_dialog.plot_results(results)
+
+    def _on_sca_error(self, msg):
+        self.sca_progress.hide()
+        self.sca_run_btn.setEnabled(True)
+        self.sca_status_label.setText(msg)
+
+    # ── Full pySCA (Tier 2) ───────────────────────────────────────
+    def _refresh_pysca_status(self):
+        installed = is_pysca_installed()
+        aligner = check_pairwise_aligner()
+        parts = []
+        if installed:
+            parts.append("pySCA: Installed")
+            self.pysca_install_btn.hide()
+        else:
+            parts.append("pySCA: Not installed")
+            self.pysca_install_btn.show()
+        if aligner:
+            parts.append(f"Pairwise aligner: {aligner}")
+        else:
+            parts.append("Pairwise aligner: not found (ggsearch36 / needle)")
+        self.pysca_status_label.setText("  |  ".join(parts))
+        self.pysca_run_btn.setEnabled(installed and self.aligned_content is not None)
+
+    def _install_pysca(self):
+        if self._pysca_install_worker and self._pysca_install_worker.isRunning():
+            return
+        self.pysca_install_btn.setEnabled(False)
+        self.pysca_status_label.setText("Installing pySCA from GitHub...")
+        self.pysca_progress.show()
+        self.pysca_log.clear()
+        self.pysca_log.show()
+
+        self._pysca_install_worker = PySCAInstallWorker()
+        self._pysca_install_worker.progress.connect(self._on_pysca_install_log)
+        self._pysca_install_worker.install_finished.connect(self._on_pysca_install_done)
+        self._pysca_install_worker.start()
+
+    def _on_pysca_install_log(self, msg):
+        self.pysca_log.append(msg)
+
+    def _on_pysca_install_done(self, success):
+        self.pysca_progress.hide()
+        self.pysca_install_btn.setEnabled(True)
+        if success:
+            QMessageBox.information(self, "pySCA", "pySCA installed successfully.")
+        else:
+            QMessageBox.warning(self, "pySCA", "pySCA installation failed. See log for details.")
+        self._refresh_pysca_status()
+
+    def _run_full_pysca(self):
+        if not self.aligned_content:
+            QMessageBox.information(self, "No alignment", "Run an alignment first.")
+            return
+        if self._pysca_run_worker and self._pysca_run_worker.isRunning():
+            QMessageBox.information(self, "pySCA", "A pySCA run is already in progress.")
+            return
+
+        # Write aligned content to a temp file
+        fd, fasta_path = tempfile.mkstemp(suffix=".fasta", prefix="pysca_input_")
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(self.aligned_content)
+
+        params = PySCAParams(
+            pdb_id=self.pysca_pdb_input.text().strip(),
+            chain=self.pysca_chain_input.text().strip(),
+            max_gap_frac_pos=self.pysca_gap_spin.value(),
+            max_gap_frac_seq=self.pysca_gap_spin.value(),
+        )
+
+        self.pysca_run_btn.setEnabled(False)
+        self.pysca_progress.show()
+        self.pysca_log.clear()
+        self.pysca_log.show()
+        self.pysca_save_db_btn.setEnabled(False)
+        self.pysca_export_csv_btn.setEnabled(False)
+        self.pysca_open_folder_btn.setEnabled(False)
+
+        self._pysca_run_worker = PySCARunWorker(fasta_path, params)
+        self._pysca_output_dir = self._pysca_run_worker.output_dir
+        self._pysca_run_worker.progress.connect(self._on_pysca_run_log)
+        self._pysca_run_worker.pipeline_finished.connect(self._on_pysca_run_done)
+        self._pysca_run_worker.error.connect(self._on_pysca_run_error)
+        self._pysca_run_worker.start()
+
+    def _on_pysca_run_log(self, msg):
+        self.pysca_log.append(msg)
+
+    def _on_pysca_run_done(self, result):
+        self.pysca_progress.hide()
+        self.pysca_run_btn.setEnabled(True)
+        if result.success:
+            self._pysca_db_path = result.db_path
+            self.pysca_save_db_btn.setEnabled(True)
+            self.pysca_export_csv_btn.setEnabled(True)
+            self.pysca_open_folder_btn.setEnabled(True)
+            self.pysca_log.append("\n=== pySCA pipeline completed successfully ===")
+        else:
+            self.pysca_log.append(f"\n=== pySCA FAILED ===\n{result.error_msg}")
+            QMessageBox.warning(self, "pySCA", f"Pipeline failed:\n{result.error_msg}")
+
+    def _on_pysca_run_error(self, msg):
+        self.pysca_progress.hide()
+        self.pysca_run_btn.setEnabled(True)
+        QMessageBox.warning(self, "pySCA Error", msg)
+
+    def _save_pysca_db(self):
+        if not self._pysca_db_path or not os.path.isfile(self._pysca_db_path):
+            QMessageBox.warning(self, "pySCA", "No .db file available.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save pySCA .db file", "sca_results.db",
+            "Pickle DB (*.db);;All Files (*.*)"
+        )
+        if path:
+            shutil.copy2(self._pysca_db_path, path)
+            QMessageBox.information(self, "Saved", f"Saved to:\n{path}")
+
+    def _export_pysca_csv(self):
+        if not self._pysca_db_path or not os.path.isfile(self._pysca_db_path):
+            QMessageBox.warning(self, "pySCA", "No .db file available.")
+            return
+        export_dir = QFileDialog.getExistingDirectory(
+            self, "Select export directory"
+        )
+        if not export_dir:
+            return
+
+        self.pysca_export_csv_btn.setEnabled(False)
+        self._pysca_export_worker = PySCAExportWorker(self._pysca_db_path, export_dir)
+        self._pysca_export_worker.progress.connect(self._on_pysca_run_log)
+        self._pysca_export_worker.export_finished.connect(self._on_pysca_export_done)
+        self._pysca_export_worker.error.connect(self._on_pysca_run_error)
+        self._pysca_export_worker.start()
+
+    def _on_pysca_export_done(self, files):
+        self.pysca_export_csv_btn.setEnabled(True)
+        QMessageBox.information(
+            self, "Export",
+            f"Exported {len(files)} file(s):\n" + "\n".join(os.path.basename(f) for f in files)
+        )
+
+    def _open_pysca_folder(self):
+        d = self._pysca_output_dir
+        if not d or not os.path.isdir(d):
+            QMessageBox.warning(self, "pySCA", "Output directory not found.")
+            return
+        if platform.system() == "Darwin":
+            subprocess.Popen(["open", d])
+        elif platform.system() == "Windows":
+            os.startfile(d)
+        else:
+            subprocess.Popen(["xdg-open", d])
 
     def _save_splitter_state(self):
         settings = QSettings("SenLab", "ProteinGUI")
