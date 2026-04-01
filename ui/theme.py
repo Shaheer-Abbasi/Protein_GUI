@@ -12,6 +12,42 @@ from PyQt5.QtGui import QFont, QFontDatabase, QPixmap, QPainter, QColor, QPolygo
 
 
 _arrow_cache = {}
+_check_cache = {}
+
+
+def _make_check_icon(size: int = 10) -> str:
+    """Render a small white checkmark PNG for checkbox indicators; path is cached."""
+    cache_key = size
+    if cache_key in _check_cache:
+        return _check_cache[cache_key]
+
+    pixmap = QPixmap(size, size)
+    pixmap.fill(Qt.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.Antialiasing)
+    pen = painter.pen()
+    pen.setColor(QColor("#FFFFFF"))
+    pen.setWidthF(max(1.5, size * 0.18))
+    pen.setCapStyle(Qt.RoundCap)
+    pen.setJoinStyle(Qt.RoundJoin)
+    painter.setPen(pen)
+    # Simple ✓: short leg + long leg
+    m = size * 0.15
+    painter.drawLine(
+        QPointF(m, size * 0.52),
+        QPointF(size * 0.38, size * 0.78),
+    )
+    painter.drawLine(
+        QPointF(size * 0.38, size * 0.78),
+        QPointF(size - m, size * 0.28),
+    )
+    painter.end()
+
+    tmp = tempfile.NamedTemporaryFile(suffix=".png", delete=False, prefix="check_")
+    pixmap.save(tmp.name, "PNG")
+    tmp.close()
+    _check_cache[cache_key] = tmp.name
+    return tmp.name
 
 
 def _make_arrow_icon(direction: str, color: str, size: int = 10) -> str:
@@ -95,10 +131,10 @@ LIGHT = {
 }
 
 DARK = {
-    "bg_primary":    "#1A1D23",
-    "bg_secondary":  "#22262E",
-    "bg_card":       "#2A2E36",
-    "bg_input":      "#2A2E36",
+    "bg_primary":    "#0F1117",
+    "bg_secondary":  "#181B22",
+    "bg_card":       "#1A1D27",
+    "bg_input":      "#151820",
     "bg_hover":      "#1B3A4B",
     "bg_selected":   "#1A4971",
 
@@ -107,8 +143,8 @@ DARK = {
     "text_muted":    "#6C7A89",
     "text_on_accent":"#FFFFFF",
 
-    "border":        "#3B4048",
-    "border_light":  "#31363F",
+    "border":        "#2A2D3E",
+    "border_light":  "#232738",
 
     "accent":        "#5DADE2",
     "accent_hover":  "#85C1E9",
@@ -121,8 +157,8 @@ DARK = {
     "error":         "#E74C3C",
     "error_bg":      "#3D1A1A",
 
-    "scrollbar_bg":  "#2A2E36",
-    "scrollbar_handle":"#4A5058",
+    "scrollbar_bg":  "#151820",
+    "scrollbar_handle":"#3D4250",
 }
 
 PAGE_ACCENTS = {
@@ -176,6 +212,7 @@ class ThemeManager(QObject):
         self._theme = theme
         self._palette = DARK.copy() if theme == "dark" else LIGHT.copy()
         _arrow_cache.clear()
+        _check_cache.clear()
         if self._app:
             self._apply_qss(self._app)
         self.theme_changed.emit(theme)
@@ -202,7 +239,7 @@ class ThemeManager(QObject):
         }}
 
         QWidget {{
-            background-color: {p['bg_primary']};
+            background-color: transparent;
             color: {p['text_primary']};
         }}
 
@@ -239,12 +276,12 @@ class ThemeManager(QObject):
 
         /* ── Group Box ──────────────────────────────────── */
         QGroupBox {{
-            font-weight: 600;
+            font-weight: normal;
             font-size: 13px;
-            border: 1px solid {p['border']};
-            border-radius: 6px;
-            margin-top: 16px;
-            padding: 24px 16px 16px 16px;
+            border: 1px solid {p['border_light']};
+            border-radius: 8px;
+            margin-top: 14px;
+            padding: 20px 14px 14px 14px;
             background-color: {p['bg_card']};
         }}
 
@@ -252,7 +289,11 @@ class ThemeManager(QObject):
             subcontrol-origin: margin;
             left: 12px;
             padding: 2px 8px;
-            color: {p['text_secondary']};
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: {p['text_muted']};
         }}
 
         /* ── Buttons ────────────────────────────────────── */
@@ -338,7 +379,8 @@ class ThemeManager(QObject):
         }}
 
         QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{
-            border-color: {p['accent']};
+            border: 2px solid {p['accent']};
+            background-color: {p['bg_input']};
         }}
 
         QTextEdit[readOnly="true"] {{
@@ -365,6 +407,11 @@ class ThemeManager(QObject):
             border-color: {p['accent']};
         }}
 
+        QComboBox:focus {{
+            border: 2px solid {p['accent']};
+            background-color: {p['bg_input']};
+        }}
+
         QComboBox::drop-down {{
             border: none;
             width: 24px;
@@ -389,7 +436,8 @@ class ThemeManager(QObject):
         }}
 
         QSpinBox:focus, QDoubleSpinBox:focus {{
-            border-color: {p['accent']};
+            border: 2px solid {p['accent']};
+            background-color: {p['bg_input']};
         }}
 
         QSpinBox::up-button, QDoubleSpinBox::up-button {{
@@ -438,9 +486,68 @@ class ThemeManager(QObject):
             font-size: 13px;
         }}
 
+        QRadioButton:checked {{
+            color: {p['accent']};
+            font-weight: 600;
+        }}
+
+        QCheckBox:checked {{
+            color: {p['text_primary']};
+        }}
+
         QRadioButton::indicator, QCheckBox::indicator {{
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
+        }}
+
+        QRadioButton::indicator:unchecked {{
+            width: 14px;
+            height: 14px;
+            border-radius: 7px;
+            border: 1px solid {p['border']};
+            background-color: {p['bg_input']};
+        }}
+
+        QRadioButton::indicator:unchecked:hover {{
+            border-color: {p['accent']};
+        }}
+
+        QRadioButton::indicator:checked {{
+            width: 14px;
+            height: 14px;
+            border-radius: 7px;
+            border: 3px solid {p['accent']};
+            background-color: {p['text_on_accent']};
+        }}
+
+        QRadioButton::indicator:checked:hover {{
+            border-color: {p['accent_hover']};
+        }}
+
+        QCheckBox::indicator:unchecked {{
+            width: 14px;
+            height: 14px;
+            border-radius: 2px;
+            border: 1px solid {p['border']};
+            background-color: {p['bg_input']};
+        }}
+
+        QCheckBox::indicator:unchecked:hover {{
+            border-color: {p['accent']};
+        }}
+
+        QCheckBox::indicator:checked {{
+            width: 14px;
+            height: 14px;
+            border-radius: 2px;
+            border: 1px solid {p['accent']};
+            background-color: {p['accent']};
+            image: url({_make_check_icon(10)});
+        }}
+
+        QCheckBox::indicator:checked:hover {{
+            border-color: {p['accent_hover']};
+            background-color: {p['accent_hover']};
         }}
 
         /* ── Scroll Area ────────────────────────────────── */
