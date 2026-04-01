@@ -4,7 +4,10 @@ from PyQt5.QtWidgets import (
     QWidget, QTabWidget, QPushButton, QStatusBar, QLabel
 )
 from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QCloseEvent
 
+from core.alignment_worker import AlignmentWorker
+from core.clustering_worker import ClusteringWorker
 from ui.theme import get_theme
 from ui.icons import feather_icon, set_button_icon
 from ui.home_page import HomePage
@@ -164,6 +167,40 @@ class ProteinGUI(QMainWindow):
     def _refresh_tab_icons(self):
         for i, icon_name in enumerate(TAB_ICONS):
             self.tabs.setTabIcon(i, feather_icon(icon_name, 18))
+
+    def closeEvent(self, event: QCloseEvent):
+        """Avoid destroying QThread-based workers while they are still running (Qt abort)."""
+        ps = self.protein_search_page
+        workers = [
+            self.tools_page.current_worker,
+            self.alignment_page.tool_install_worker,
+            self.alignment_page.alignment_worker,
+            ps.tool_install_worker,
+            ps.blast_worker,
+            ps.mmseqs_worker,
+            getattr(ps, "sequence_fetcher", None),
+            getattr(ps, "align_sequence_fetcher", None),
+            self.clustering_page.tool_install_worker,
+            self.clustering_page.clustering_worker,
+            self.blastn_page.tool_install_worker,
+            self.blastn_page.blast_worker,
+            self.database_downloads_page.current_worker,
+            self.motif_search_page.search_worker,
+        ]
+        for w in workers:
+            if w is None or not w.isRunning():
+                continue
+            if isinstance(w, (AlignmentWorker, ClusteringWorker)):
+                w.cancel()
+                w.terminate()
+            elif callable(getattr(w, "cancel", None)):
+                w.cancel()
+            elif callable(getattr(w, "stop", None)):
+                w.stop()
+            else:
+                w.terminate()
+            w.wait(300_000)
+        event.accept()
 
 
 def main():

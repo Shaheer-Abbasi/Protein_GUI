@@ -289,8 +289,9 @@ class ToolsPage(QWidget):
         self.current_worker = ToolInstallWorker([tool_id])
         self.current_worker.progress.connect(self._on_progress)
         self.current_worker.log.connect(self._on_log)
-        self.current_worker.finished.connect(self._on_tool_install_finished)
+        self.current_worker.install_finished.connect(self._on_tool_install_finished)
         self.current_worker.error.connect(self._on_error)
+        self.current_worker.finished.connect(self._on_tool_install_thread_finished)
         self.current_worker.start()
 
     def _on_tool_source_requested(self, tool_id: str, source: str):
@@ -304,9 +305,16 @@ class ToolsPage(QWidget):
     def _on_tool_refresh_requested(self, _tool_id: str):
         self._load_tools()
 
-    def _on_tool_install_finished(self, result: dict):
-        self.progress_widget.setVisible(False)
+    def _on_tool_install_thread_finished(self):
+        """QThread.finished: clear reference only after the worker thread has stopped."""
+        worker = self.sender()
+        if worker is not self.current_worker:
+            return
         self.current_worker = None
+        self.progress_widget.setVisible(False)
+        self.cancel_btn.setEnabled(True)
+
+    def _on_tool_install_finished(self, result: dict):
         self._load_tools()
 
         tool_names = ", ".join(TOOLS[tid].display_name for tid in result.get("tool_ids", []))
@@ -329,12 +337,10 @@ class ToolsPage(QWidget):
 
     def _on_error(self, error_msg: str):
         t = get_theme()
-        self.progress_widget.setVisible(False)
         self.status_label.setText("Error")
         self.status_label.setStyleSheet(f"color: {t.get('error')}; font-weight: bold;")
         self.log_output.append(f"\nERROR: {error_msg}")
         QMessageBox.critical(self, "Error", f"An error occurred:\n\n{error_msg}")
-        self.current_worker = None
         self._load_tools()
         self.status_label.setStyleSheet("")
 
@@ -348,5 +354,5 @@ class ToolsPage(QWidget):
             )
             if reply == QMessageBox.Yes:
                 self.current_worker.cancel()
-                self.progress_widget.setVisible(False)
-                self.current_worker = None
+                self.status_label.setText("Cancelling installation...")
+                self.cancel_btn.setEnabled(False)

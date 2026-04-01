@@ -427,10 +427,11 @@ class DatabaseDownloadsPage(QWidget):
         self.current_worker = DatabaseDownloadWorker(entry, dest_dir)
         self.current_worker.progress.connect(self._on_progress)
         self.current_worker.log.connect(self._on_log)
-        self.current_worker.finished.connect(
+        self.current_worker.download_finished.connect(
             lambda path: self._on_download_finished(entry, path)
         )
         self.current_worker.error.connect(self._on_error)
+        self.current_worker.finished.connect(self._on_db_worker_thread_finished)
         self.current_worker.start()
 
     def _on_install_requested(self, entry: DatabaseEntry):
@@ -467,10 +468,11 @@ class DatabaseDownloadsPage(QWidget):
         self.current_worker = DatabaseInstallWorker(entry, dest_dir)
         self.current_worker.progress.connect(self._on_progress)
         self.current_worker.log.connect(self._on_log)
-        self.current_worker.finished.connect(
+        self.current_worker.install_finished.connect(
             lambda path: self._on_download_finished(entry, path)
         )
         self.current_worker.error.connect(self._on_error)
+        self.current_worker.finished.connect(self._on_db_worker_thread_finished)
         self.current_worker.start()
 
     def _on_open_link(self, url: str):
@@ -494,6 +496,14 @@ class DatabaseDownloadsPage(QWidget):
         scrollbar = self.log_output.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 
+    def _on_db_worker_thread_finished(self):
+        """QThread.finished: drop worker only after the background thread has stopped."""
+        worker = self.sender()
+        if worker is not self.current_worker:
+            return
+        self.current_worker = None
+        self.progress_widget.setVisible(False)
+
     def _on_download_finished(self, entry: DatabaseEntry, path: str):
         self.progress_widget.setVisible(False)
 
@@ -515,8 +525,6 @@ class DatabaseDownloadsPage(QWidget):
             f"Location: {path}"
         )
 
-        self.current_worker = None
-
     def _on_error(self, error_msg: str):
         t = get_theme()
         self.progress_widget.setVisible(False)
@@ -527,7 +535,6 @@ class DatabaseDownloadsPage(QWidget):
 
         QMessageBox.critical(self, "Error", f"An error occurred:\n\n{error_msg}")
 
-        self.current_worker = None
         self.status_label.setStyleSheet("")
 
     def _cancel_download(self):
@@ -539,5 +546,4 @@ class DatabaseDownloadsPage(QWidget):
             )
             if reply == QMessageBox.Yes:
                 self.current_worker.cancel()
-                self.progress_widget.setVisible(False)
-                self.current_worker = None
+                self.status_label.setText("Cancelling…")

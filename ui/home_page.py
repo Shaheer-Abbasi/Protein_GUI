@@ -140,7 +140,7 @@ class HomePage(QWidget):
             ("protein_search", "Protein Search",     "Search protein sequences using BLASTP or MMseqs2 against local or remote databases", "search"),
             ("blastn",         "BLASTN Search",      "Search nucleotide sequences against NCBI databases for DNA/RNA homology",            "search"),
             ("clustering",     "MMseqs2 Clustering", "Cluster protein sequences by similarity to group related sequences",                 "grid"),
-            ("alignment",      "Sequence Alignment", "Multiple sequence alignment using Clustal Omega with ClustalX visualisation",        "bar-chart-2"),
+            ("alignment",      "Sequence Alignment", "Multiple sequence alignment (Clustal Omega, MAFFT, MUSCLE, or FAMSA) with MSA viewer",        "bar-chart-2"),
             ("motif_search",   "Motif Search",       "Find glycosylation motifs in protein sequences with visualisation",                  "filter"),
             ("database_downloads","Database Downloads","Download and manage protein databases for BLAST and MMseqs2 searches",             "database"),
         ]

@@ -1,7 +1,8 @@
-"""Sequence Alignment page - Multiple Sequence Alignment using Clustal Omega"""
+"""Sequence Alignment page - Multiple sequence alignment (several backends)."""
 import os
 import shutil
 import tempfile
+import time
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QLineEdit, QComboBox, QGroupBox, QTextEdit,
@@ -9,23 +10,24 @@ from PyQt5.QtWidgets import (
     QFrame, QSpinBox, QCheckBox, QSplitter, QScrollArea, QSizePolicy
 )
 from PyQt5.QtCore import pyqtSignal, Qt, QTimer, QSettings
-from PyQt5.QtGui import QFont
 
 from ui.theme import get_theme
 from ui.icons import feather_icon, set_button_icon
 from core.tool_install_worker import ToolInstallWorker
 from core.tool_runtime import get_tool_runtime
+from core.tool_registry import alignment_feature_id_for_tool
 from core.alignment_worker import (
     AlignmentWorker,
-    check_clustalo_installation,
-    SequenceAlignmentPrep
+    SequenceAlignmentPrep,
+    check_alignment_tool_installation,
+    aligner_display_name,
+    max_sequences_for_tool,
 )
 from ui.widgets.msa_viewer_widget import MSAViewerWidget, check_webengine_available
-from utils.fasta_parser import FastaParser, FastaParseError
 
 
 class AlignmentPage(QWidget):
-    """Sequence Alignment page using Clustal Omega"""
+    """Sequence alignment with Clustal Omega, MAFFT, MUSCLE, or FAMSA."""
 
     back_requested = pyqtSignal()
 
@@ -39,12 +41,16 @@ class AlignmentPage(QWidget):
         self.is_temp_fasta = False
         self.tool_install_worker = None
         self._pending_tool_action = None
+        self._align_elapsed_timer = QTimer(self)
+        self._align_elapsed_timer.setInterval(1000)
+        self._align_elapsed_timer.timeout.connect(self._tick_alignment_elapsed)
+        self._align_t0 = None
+        self._align_status_base = ""
         self._init_ui()
 
         QTimer.singleShot(2000, self.check_system_requirements)
 
     def _init_ui(self):
-        t = get_theme()
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
@@ -145,18 +151,22 @@ class AlignmentPage(QWidget):
         params_group = QGroupBox("Alignment Parameters")
         pl = QVBoxLayout()
 
-        fmt_row = QHBoxLayout()
-        fmt_row.addWidget(QLabel("Output Format:"))
-        self.format_combo = QComboBox()
-        self.format_combo.addItem("FASTA (aligned)", "fasta")
-        self.format_combo.addItem("Clustal", "clustal")
-        self.format_combo.addItem("MSF", "msf")
-        self.format_combo.addItem("PHYLIP", "phylip")
-        self.format_combo.addItem("Stockholm", "stockholm")
-        fmt_row.addWidget(self.format_combo)
-        fmt_row.addStretch()
-        pl.addLayout(fmt_row)
+        tool_row = QHBoxLayout()
+        tool_row.addWidget(QLabel("Alignment tool:"))
+        self.tool_combo = QComboBox()
+        self.tool_combo.addItem("Clustal Omega", "clustalo")
+        self.tool_combo.addItem("MAFFT", "mafft")
+        self.tool_combo.addItem("MUSCLE", "muscle")
+        self.tool_combo.addItem("FAMSA", "famsa")
+        self.tool_combo.setToolTip("Choose the multiple sequence alignment program")
+        tool_row.addWidget(self.tool_combo)
+        tool_row.addStretch()
+        pl.addLayout(tool_row)
 
+        # Clustal Omega: iterations + full refinement
+        self.clustalo_params_widget = QWidget()
+        clustalo_pl = QVBoxLayout(self.clustalo_params_widget)
+        clustalo_pl.setContentsMargins(0, 0, 0, 0)
         iter_row = QHBoxLayout()
         iter_row.addWidget(QLabel("Iterations:"))
         self.iter_spin = QSpinBox()
@@ -165,11 +175,50 @@ class AlignmentPage(QWidget):
         self.iter_spin.setToolTip("Number of combined iterations (0 = auto)")
         iter_row.addWidget(self.iter_spin)
         iter_row.addStretch()
-        pl.addLayout(iter_row)
-
+        clustalo_pl.addLayout(iter_row)
         self.full_iter_checkbox = QCheckBox("Full iterative refinement")
         self.full_iter_checkbox.setToolTip("Use full iterative refinement (slower but more accurate)")
-        pl.addWidget(self.full_iter_checkbox)
+        clustalo_pl.addWidget(self.full_iter_checkbox)
+        pl.addWidget(self.clustalo_params_widget)
+
+        # MAFFT: alignment strategy
+        self.mafft_params_widget = QWidget()
+        mafft_pl = QVBoxLayout(self.mafft_params_widget)
+        mafft_pl.setContentsMargins(0, 0, 0, 0)
+        strat_row = QHBoxLayout()
+        strat_row.addWidget(QLabel("MAFFT strategy:"))
+        self.mafft_strategy_combo = QComboBox()
+        self.mafft_strategy_combo.addItem("Auto", "auto")
+        self.mafft_strategy_combo.addItem("L-INS-i (accurate, ≤200 seq)", "linsi")
+        self.mafft_strategy_combo.addItem("G-INS-i", "ginsi")
+        self.mafft_strategy_combo.addItem("E-INS-i", "einsi")
+        self.mafft_strategy_combo.addItem("FFT-NS-2 (fast)", "fftns2")
+        self.mafft_strategy_combo.setToolTip("Alignment strategy; L-INS-i is slow but accurate for few sequences")
+        strat_row.addWidget(self.mafft_strategy_combo)
+        strat_row.addStretch()
+        mafft_pl.addLayout(strat_row)
+        pl.addWidget(self.mafft_params_widget)
+        self.mafft_params_widget.hide()
+
+        # FAMSA: optional medoid tree (large sets)
+        self.famsa_params_widget = QWidget()
+        famsa_pl = QVBoxLayout(self.famsa_params_widget)
+        famsa_pl.setContentsMargins(0, 0, 0, 0)
+        self.famsa_medoid_checkbox = QCheckBox("Use medoid tree (recommended for very large sets)")
+        self.famsa_medoid_checkbox.setToolTip("FAMSA --medoid-tree: faster, scalable guide tree for huge inputs")
+        famsa_pl.addWidget(self.famsa_medoid_checkbox)
+        pl.addWidget(self.famsa_params_widget)
+        self.famsa_params_widget.hide()
+
+        fmt_row = QHBoxLayout()
+        fmt_row.addWidget(QLabel("Output format:"))
+        self.format_combo = QComboBox()
+        fmt_row.addWidget(self.format_combo)
+        fmt_row.addStretch()
+        pl.addLayout(fmt_row)
+
+        self.tool_combo.currentIndexChanged.connect(self._on_alignment_tool_changed)
+        self._refresh_output_format_combo()
 
         params_group.setLayout(pl)
         form.addWidget(params_group)
@@ -286,34 +335,85 @@ class AlignmentPage(QWidget):
             self.upload_widget.hide()
             self.paste_widget.show()
 
+    def _selected_tool_id(self):
+        return self.tool_combo.currentData() or "clustalo"
+
+    def _refresh_output_format_combo(self):
+        """Repopulate output formats based on the selected aligner."""
+        tool_id = self._selected_tool_id()
+        prev = self.format_combo.currentData()
+        self.format_combo.blockSignals(True)
+        self.format_combo.clear()
+        if tool_id == "clustalo":
+            self.format_combo.addItem("FASTA (aligned)", "fasta")
+            self.format_combo.addItem("Clustal", "clustal")
+            self.format_combo.addItem("MSF", "msf")
+            self.format_combo.addItem("PHYLIP", "phylip")
+            self.format_combo.addItem("Stockholm", "stockholm")
+        elif tool_id == "mafft":
+            self.format_combo.addItem("FASTA (aligned)", "fasta")
+            self.format_combo.addItem("Clustal", "clustal")
+        else:
+            self.format_combo.addItem("FASTA (aligned)", "fasta")
+        # Restore previous format if still valid
+        idx = self.format_combo.findData(prev)
+        if idx >= 0:
+            self.format_combo.setCurrentIndex(idx)
+        else:
+            self.format_combo.setCurrentIndex(0)
+        self.format_combo.blockSignals(False)
+
+    def _on_alignment_tool_changed(self):
+        tool_id = self._selected_tool_id()
+        self.clustalo_params_widget.setVisible(tool_id == "clustalo")
+        self.mafft_params_widget.setVisible(tool_id == "mafft")
+        self.famsa_params_widget.setVisible(tool_id == "famsa")
+        self._refresh_output_format_combo()
+        self.check_system_requirements()
+        if self.input_fasta_path and os.path.exists(self.input_fasta_path):
+            self.load_fasta_file(self.input_fasta_path, is_temp=self.is_temp_fasta)
+
     # ── System requirements ──────────────────────────────────────
     def check_system_requirements(self):
         runtime = get_tool_runtime()
-        clustalo_installed, version, path = check_clustalo_installation()
-        if not clustalo_installed:
+        tool_id = self._selected_tool_id()
+        name = aligner_display_name(tool_id)
+        installed, _version, _path = check_alignment_tool_installation(tool_id)
+        if not installed:
             self.warning_label.setText(
-                "Clustal Omega is not currently available. Use the Tools tab to install it, "
+                f"{name} is not currently available. Use the Tools tab to install it, "
                 "or click Run and the app will prompt to install it."
             )
             self.warning_label.show()
-            self.run_button.setEnabled(bool(runtime.get_installable_tools(["clustalo"])))
+            self.run_button.setEnabled(bool(runtime.get_installable_tools([tool_id])))
             return
 
         self.warning_label.hide()
-        self.run_button.setEnabled(True)
+        # Run stays disabled until a valid FASTA is loaded (see load_fasta_file)
+        if self.input_fasta_path and os.path.exists(self.input_fasta_path):
+            max_seq = max_sequences_for_tool(tool_id)
+            is_valid, _msg, _c = SequenceAlignmentPrep.validate_fasta_for_alignment(
+                self.input_fasta_path, max_sequences=max_seq
+            )
+            self.run_button.setEnabled(is_valid)
+        else:
+            self.run_button.setEnabled(True)
 
     def _ensure_alignment_tools(self):
         runtime = get_tool_runtime()
-        missing = runtime.get_missing_tools_for_feature("alignment")
+        tool_id = self._selected_tool_id()
+        feature_id = alignment_feature_id_for_tool(tool_id)
+        missing = runtime.get_missing_tools_for_feature(feature_id)
         if not missing:
             return True
 
+        name = aligner_display_name(tool_id)
         installable = runtime.get_installable_tools(missing)
         if installable:
             reply = QMessageBox.question(
                 self,
                 "Install Required Tools",
-                "Alignment requires Clustal Omega.\n\nInstall it now?",
+                f"Alignment requires {name}.\n\nInstall it now?",
                 QMessageBox.Yes | QMessageBox.No,
             )
             if reply != QMessageBox.Yes:
@@ -325,20 +425,26 @@ class AlignmentPage(QWidget):
             self.tool_install_worker.progress.connect(
                 lambda current, total, status: self.status_label.setText(status)
             )
-            self.tool_install_worker.finished.connect(self._on_tool_install_finished)
+            self.tool_install_worker.install_finished.connect(self._on_tool_install_finished)
             self.tool_install_worker.error.connect(self._on_tool_install_error)
+            self.tool_install_worker.finished.connect(self._on_tool_install_thread_finished)
             self.tool_install_worker.start()
             return False
 
         QMessageBox.warning(
             self,
             "Tool Missing",
-            "Clustal Omega is not available on this system and cannot be installed automatically here.",
+            f"{name} is not available on this system and cannot be installed automatically here.",
         )
         return False
 
-    def _on_tool_install_finished(self, _result):
+    def _on_tool_install_thread_finished(self):
+        worker = self.sender()
+        if worker is not self.tool_install_worker:
+            return
         self.tool_install_worker = None
+
+    def _on_tool_install_finished(self, _result):
         self.run_button.setEnabled(True)
         self.check_system_requirements()
         self.status_label.setText("Required tools installed.")
@@ -348,7 +454,6 @@ class AlignmentPage(QWidget):
             pending()
 
     def _on_tool_install_error(self, error_msg):
-        self.tool_install_worker = None
         self.run_button.setEnabled(True)
         self._pending_tool_action = None
         self.status_label.setText("Tool installation failed.")
@@ -368,7 +473,10 @@ class AlignmentPage(QWidget):
             QMessageBox.warning(self, "File Not Found", f"File not found: {file_path}")
             return False
 
-        is_valid, message, seq_count = SequenceAlignmentPrep.validate_fasta_for_alignment(file_path)
+        max_seq = max_sequences_for_tool(self._selected_tool_id())
+        is_valid, message, seq_count = SequenceAlignmentPrep.validate_fasta_for_alignment(
+            file_path, max_sequences=max_seq
+        )
 
         self.input_fasta_path = file_path
         self.file_path_input.setText(file_path)
@@ -405,7 +513,10 @@ class AlignmentPage(QWidget):
                 self.input_fasta_path = temp_path
                 self.is_temp_fasta = True
 
-                is_valid, message, seq_count = SequenceAlignmentPrep.validate_fasta_for_alignment(temp_path)
+                max_seq = max_sequences_for_tool(self._selected_tool_id())
+                is_valid, message, seq_count = SequenceAlignmentPrep.validate_fasta_for_alignment(
+                    temp_path, max_sequences=max_seq
+                )
                 if not is_valid:
                     QMessageBox.warning(self, "Invalid Sequences", message)
                     os.remove(temp_path)
@@ -421,6 +532,9 @@ class AlignmentPage(QWidget):
         output_format = self.format_combo.currentData()
         iterations = self.iter_spin.value()
         full_iter = self.full_iter_checkbox.isChecked()
+        tool_id = self._selected_tool_id()
+        mafft_strategy = self.mafft_strategy_combo.currentData() or "auto"
+        famsa_medoid = self.famsa_medoid_checkbox.isChecked()
 
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
@@ -428,11 +542,18 @@ class AlignmentPage(QWidget):
         self.progress_bar.show()
         self.results_tabs.hide()
 
+        self._align_t0 = time.monotonic()
+        self._align_status_base = ""
+        self._align_elapsed_timer.start()
+
         self.alignment_worker = AlignmentWorker(
             self.input_fasta_path,
+            tool_id=tool_id,
             output_format=output_format,
             iterations=iterations,
-            full_iter=full_iter
+            full_iter=full_iter,
+            mafft_strategy=mafft_strategy,
+            famsa_medoid_tree=famsa_medoid,
         )
         self.alignment_worker.progress.connect(self.on_progress)
         self.alignment_worker.finished.connect(self.on_alignment_finished)
@@ -440,6 +561,7 @@ class AlignmentPage(QWidget):
         self.alignment_worker.start()
 
     def cancel_alignment(self):
+        self._stop_alignment_elapsed_timer()
         if self.alignment_worker:
             self.alignment_worker.cancel()
             self.alignment_worker.terminate()
@@ -450,11 +572,28 @@ class AlignmentPage(QWidget):
         self.cancel_button.setEnabled(False)
         self.progress_bar.hide()
 
+    def _stop_alignment_elapsed_timer(self):
+        self._align_elapsed_timer.stop()
+        self._align_t0 = None
+
+    def _refresh_alignment_status_label(self):
+        if self._align_t0 is None:
+            return
+        secs = int(time.monotonic() - self._align_t0)
+        m, s = secs // 60, secs % 60
+        base = self._align_status_base or "Working"
+        self.status_label.setText(f"{base}   (elapsed {m}:{s:02d})")
+
+    def _tick_alignment_elapsed(self):
+        self._refresh_alignment_status_label()
+
     def on_progress(self, percent, message):
         self.progress_bar.setValue(percent)
-        self.status_label.setText(message)
+        self._align_status_base = message
+        self._refresh_alignment_status_label()
 
     def on_alignment_finished(self, aligned_content, output_path):
+        self._stop_alignment_elapsed_timer()
         self.aligned_content = aligned_content
         self.output_alignment_path = output_path
 
@@ -472,6 +611,7 @@ class AlignmentPage(QWidget):
         self.results_tabs.show()
 
     def on_alignment_error(self, error_msg):
+        self._stop_alignment_elapsed_timer()
         QMessageBox.critical(self, "Alignment Error", f"An error occurred:\n\n{error_msg}")
         self.run_button.setEnabled(True)
         self.cancel_button.setEnabled(False)

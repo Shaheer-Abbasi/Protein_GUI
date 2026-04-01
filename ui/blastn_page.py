@@ -538,8 +538,9 @@ class BLASTNPage(QWidget):
             self.tool_install_worker.progress.connect(
                 lambda current, total, status: self.status_label.setText(status)
             )
-            self.tool_install_worker.finished.connect(self._on_tool_install_finished)
+            self.tool_install_worker.install_finished.connect(self._on_tool_install_finished)
             self.tool_install_worker.error.connect(self._on_tool_install_error)
+            self.tool_install_worker.finished.connect(self._on_tool_install_thread_finished)
             self.tool_install_worker.start()
             return False
 
@@ -550,8 +551,13 @@ class BLASTNPage(QWidget):
         )
         return False
 
-    def _on_tool_install_finished(self, _result):
+    def _on_tool_install_thread_finished(self):
+        worker = self.sender()
+        if worker is not self.tool_install_worker:
+            return
         self.tool_install_worker = None
+
+    def _on_tool_install_finished(self, _result):
         self.process_button.setEnabled(True)
         self.status_label.setText("Required tools installed.")
         pending = self._pending_tool_action
@@ -560,7 +566,6 @@ class BLASTNPage(QWidget):
             pending()
 
     def _on_tool_install_error(self, error_msg: str):
-        self.tool_install_worker = None
         self.process_button.setEnabled(True)
         self._pending_tool_action = None
         self.status_label.setText("Tool installation failed.")

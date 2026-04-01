@@ -46,6 +46,9 @@ class ConfigManager:
             "blast_path": "blastp",  # Assume in PATH
             "mmseqs_path": "mmseqs",  # Assume in PATH
             "clustalo_path": "clustalo",
+            "mafft_path": "mafft",
+            "muscle_path": "muscle",
+            "famsa_path": "famsa",
             "blastdbcmd_path": "blastdbcmd",
             "mmseqs_available": False,
             "blastdbcmd_available": False,
@@ -97,6 +100,18 @@ class ConfigManager:
     def get_clustalo_path(self):
         """Get Clustal Omega executable path."""
         return self.config.get("clustalo_path", "clustalo")
+
+    def get_mafft_path(self):
+        """Get MAFFT executable path."""
+        return self.config.get("mafft_path", "mafft")
+
+    def get_muscle_path(self):
+        """Get MUSCLE executable path."""
+        return self.config.get("muscle_path", "muscle")
+
+    def get_famsa_path(self):
+        """Get FAMSA executable path."""
+        return self.config.get("famsa_path", "famsa")
 
     def get_blastdbcmd_path(self):
         """Get blastdbcmd executable path."""

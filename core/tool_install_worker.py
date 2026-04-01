@@ -10,7 +10,8 @@ class ToolInstallWorker(QThread):
 
     progress = pyqtSignal(int, int, str)
     log = pyqtSignal(str)
-    finished = pyqtSignal(object)
+    # Named install_finished so we do not shadow QThread.finished (needed for safe cleanup).
+    install_finished = pyqtSignal(object)
     error = pyqtSignal(str)
 
     def __init__(self, tool_ids):
@@ -40,7 +41,7 @@ class ToolInstallWorker(QThread):
                 log_cb=log_cb,
                 cancel_check=lambda: self._cancelled,
             )
-            self.finished.emit(
+            self.install_finished.emit(
                 {
                     "tool_ids": self.tool_ids,
                     "env_path": env_path,
