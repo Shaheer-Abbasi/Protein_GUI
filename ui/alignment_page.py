@@ -23,7 +23,7 @@ from core.alignment_worker import (
     aligner_display_name,
     max_sequences_for_tool,
 )
-from ui.widgets.msa_viewer_widget import MSAViewerWidget, check_webengine_available
+from ui.dialogs.alignment_viewer_dialog import AlignmentViewerDialog
 
 
 class AlignmentPage(QWidget):
@@ -46,6 +46,8 @@ class AlignmentPage(QWidget):
         self._align_elapsed_timer.timeout.connect(self._tick_alignment_elapsed)
         self._align_t0 = None
         self._align_status_base = ""
+        self._viewer_dialog = None
+        self._alignment_output_format = None
         self._init_ui()
 
         QTimer.singleShot(2000, self.check_system_requirements)
@@ -76,19 +78,6 @@ class AlignmentPage(QWidget):
         self.warning_label.setWordWrap(True)
         self.warning_label.hide()
         form.addWidget(self.warning_label)
-
-        # PyQtWebEngine warning
-        self.webengine_warning = QLabel()
-        self.webengine_warning.setWordWrap(True)
-        if not check_webengine_available():
-            self.webengine_warning.setText(
-                "PyQtWebEngine is not installed. The alignment viewer is disabled.\n"
-                "You can still run alignments and export results. To enable the viewer:\n"
-                "pip install PyQtWebEngine"
-            )
-        else:
-            self.webengine_warning.hide()
-        form.addWidget(self.webengine_warning)
 
         # ── Input section ────────────────────────────────────────
         input_group = QGroupBox("Input Sequences")
@@ -264,20 +253,35 @@ class AlignmentPage(QWidget):
         input_scroll.setWidget(input_widget)
         splitter.addWidget(input_scroll)
 
-        # ── Bottom: results tabs ─────────────────────────────────
+        # ── Bottom: viewer button + results tabs ─────────────────
+        results_panel = QWidget()
+        rp_layout = QVBoxLayout(results_panel)
+        rp_layout.setContentsMargins(0, 0, 0, 0)
+        rp_layout.setSpacing(8)
+
+        viewer_bar = QHBoxLayout()
+        self.open_viewer_btn = QPushButton("Open Alignment Viewer")
+        self.open_viewer_btn.setProperty("class", "success")
+        set_button_icon(self.open_viewer_btn, "eye", 16, "#FFFFFF")
+        self.open_viewer_btn.setToolTip(
+            "Open the interactive MSA viewer in a separate window (XML color schemes, zoom, export)."
+        )
+        self.open_viewer_btn.clicked.connect(self._open_alignment_viewer)
+        viewer_bar.addWidget(self.open_viewer_btn)
+        viewer_hint = QLabel("Colored by consensus rules from bundled XML schemes (see viewer toolbar).")
+        viewer_hint.setProperty("class", "muted")
+        viewer_hint.setWordWrap(True)
+        viewer_bar.addWidget(viewer_hint, 1)
+        rp_layout.addLayout(viewer_bar)
+
         self.results_tabs = QTabWidget()
         self.results_tabs.hide()
+        rp_layout.addWidget(self.results_tabs, 1)
 
-        # Tab 1: Alignment Viewer
-        viewer_tab = QWidget()
-        vl = QVBoxLayout(viewer_tab)
-        vl.setContentsMargins(0, 0, 0, 0)
-        self.msa_viewer = MSAViewerWidget()
-        self.msa_viewer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        vl.addWidget(self.msa_viewer)
-        self.results_tabs.addTab(viewer_tab, feather_icon("eye", 16), "Alignment Viewer")
+        results_panel.hide()
+        self._results_panel = results_panel
 
-        # Tab 2: Raw Alignment
+        # Tab 1: Raw Alignment
         raw_tab = QWidget()
         rl = QVBoxLayout(raw_tab)
         rl.setContentsMargins(12, 12, 12, 12)
@@ -311,7 +315,7 @@ class AlignmentPage(QWidget):
         el.addStretch()
         self.results_tabs.addTab(export_tab, feather_icon("download", 16), "Export")
 
-        splitter.addWidget(self.results_tabs)
+        splitter.addWidget(self._results_panel)
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
 
@@ -325,6 +329,33 @@ class AlignmentPage(QWidget):
         splitter.splitterMoved.connect(self._save_splitter_state)
 
         root.addWidget(splitter)
+
+    def _ensure_alignment_viewer_dialog(self) -> AlignmentViewerDialog:
+        if self._viewer_dialog is None:
+            self._viewer_dialog = AlignmentViewerDialog(self)
+        return self._viewer_dialog
+
+    def _open_alignment_viewer(self):
+        if not self.aligned_content and not self.output_alignment_path:
+            QMessageBox.information(
+                self, "No alignment",
+                "Run an alignment first, then open the viewer.",
+            )
+            return
+        fmt = self._alignment_output_format or self.format_combo.currentData()
+        if fmt != "fasta":
+            QMessageBox.information(
+                self, "Alignment viewer",
+                "The pop-out viewer loads aligned FASTA.\n"
+                "Re-run the alignment with output format “FASTA (aligned)” to use it.",
+            )
+            return
+        dlg = self._ensure_alignment_viewer_dialog()
+        if not dlg.load_alignment(self.aligned_content):
+            return
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
 
     # ── Input method switching ───────────────────────────────────
     def _on_input_method_changed(self):
@@ -541,6 +572,7 @@ class AlignmentPage(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self.results_tabs.hide()
+        self._results_panel.hide()
 
         self._align_t0 = time.monotonic()
         self._align_status_base = ""
@@ -596,11 +628,7 @@ class AlignmentPage(QWidget):
         self._stop_alignment_elapsed_timer()
         self.aligned_content = aligned_content
         self.output_alignment_path = output_path
-
-        if self.format_combo.currentData() == 'fasta':
-            self.msa_viewer.load_alignment(aligned_content)
-        else:
-            self.msa_viewer.load_alignment_file(output_path)
+        self._alignment_output_format = self.format_combo.currentData()
 
         self.raw_alignment_text.setPlainText(aligned_content)
 
@@ -608,7 +636,16 @@ class AlignmentPage(QWidget):
         self.cancel_button.setEnabled(False)
         self.progress_bar.hide()
         self.status_label.setText("Alignment complete!")
+        self._results_panel.show()
         self.results_tabs.show()
+
+        # Pop-out viewer expects aligned FASTA; other formats stay in Raw / Export tabs.
+        if self._alignment_output_format == "fasta":
+            dlg = self._ensure_alignment_viewer_dialog()
+            dlg.load_alignment(aligned_content)
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
 
     def on_alignment_error(self, error_msg):
         self._stop_alignment_elapsed_timer()
