@@ -117,3 +117,29 @@ NUCLEOTIDE_DATABASES = {
     'human_genomic': 'Human genomic sequences',
     'mouse_genomic': 'Mouse genomic sequences',
 }
+
+# Remote BLASTN is much more limited than local BLAST database installs.
+# Keep the remote list intentionally small and conservative so the GUI does
+# not offer databases that are only available for local use or fail remotely.
+REMOTE_NUCLEOTIDE_DATABASES = {
+    'core_nt': 'Core nucleotide collection (faster remote default)',
+    'nt': 'Nucleotide collection (comprehensive)',
+    'refseq_rna': 'Reference RNA sequences (RefSeq)',
+    'refseq_genomic': 'Reference genomic sequences (RefSeq)',
+    'est': 'Expressed sequence tags (all organisms)',
+}
+
+LOCAL_NUCLEOTIDE_DEFAULT = 'nt'
+REMOTE_NUCLEOTIDE_DEFAULT = 'core_nt'
+
+
+def get_blastn_databases(use_remote: bool):
+    return REMOTE_NUCLEOTIDE_DATABASES if use_remote else NUCLEOTIDE_DATABASES
+
+
+def get_default_blastn_database(use_remote: bool):
+    return REMOTE_NUCLEOTIDE_DEFAULT if use_remote else LOCAL_NUCLEOTIDE_DEFAULT
+
+
+def is_remote_blastn_database_supported(database: str) -> bool:
+    return database in REMOTE_NUCLEOTIDE_DATABASES

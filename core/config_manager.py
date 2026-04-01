@@ -1,11 +1,18 @@
-"""Centralized configuration manager for Protein-GUI"""
+"""Centralized configuration manager for Protein-GUI."""
 import json
 import os
 
 
+def _default_managed_tools_root():
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA", os.path.expanduser("~"))
+        return os.path.join(base, "SenLab", "ProteinGUI", "tools")
+    return os.path.join(os.path.expanduser("~"), ".senlab", "protein_gui", "tools")
+
+
 class ConfigManager:
-    """Manages application configuration across different machines"""
-    
+    """Manages application configuration across different machines."""
+
     def __init__(self, config_path="config.json"):
         self.config_path = config_path
         self.config = self._load_config()
@@ -15,28 +22,39 @@ class ConfigManager:
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, 'r') as f:
-                    return json.load(f)
+                    loaded = json.load(f)
+                defaults = self._get_defaults()
+                defaults.update(loaded)
+                return defaults
             except Exception as e:
                 print(f"Warning: Could not load config: {e}")
                 return self._get_defaults()
         else:
             # First time setup - notify user
             print("=" * 60)
-            print("⚠️  config.json not found!")
+            print("config.json not found!")
             print("=" * 60)
             print("This appears to be your first time running on this machine.")
-            print("Please run: python setup_wizard.py")
+            print("The GUI can install most required tools for you from inside the app.")
+            print("You can still run: python setup_wizard.py for diagnostics or inspect config.json for advanced overrides.")
             print("=" * 60)
             return self._get_defaults()
     
     def _get_defaults(self):
-        """Return default configuration"""
+        """Return default configuration."""
         return {
             "blast_path": "blastp",  # Assume in PATH
             "mmseqs_path": "mmseqs",  # Assume in PATH
+            "clustalo_path": "clustalo",
+            "blastdbcmd_path": "blastdbcmd",
             "mmseqs_available": False,
             "blastdbcmd_available": False,
-            "databases_found": []
+            "databases_found": [],
+            "tool_backend_preference": "managed",
+            "managed_tools_root": _default_managed_tools_root(),
+            "managed_env_name": "bio-tools",
+            "preferred_tool_sources": ["managed", "configured", "system", "wsl"],
+            "tool_source_overrides": {},
         }
     
     def get(self, key, default=None):
@@ -75,6 +93,37 @@ class ConfigManager:
     def get_mmseqs_path(self):
         """Get MMSeqs2 executable path"""
         return self.config.get('mmseqs_path', 'mmseqs')
+
+    def get_clustalo_path(self):
+        """Get Clustal Omega executable path."""
+        return self.config.get("clustalo_path", "clustalo")
+
+    def get_blastdbcmd_path(self):
+        """Get blastdbcmd executable path."""
+        return self.config.get("blastdbcmd_path", "blastdbcmd")
+
+    def get_tool_backend_preference(self):
+        """Get the preferred tool backend strategy."""
+        return self.config.get("tool_backend_preference", "managed")
+
+    def get_managed_tools_root(self):
+        """Get the per-user managed tools root directory."""
+        return self.config.get("managed_tools_root", _default_managed_tools_root())
+
+    def get_managed_env_name(self):
+        """Get the name of the shared managed environment."""
+        return self.config.get("managed_env_name", "bio-tools")
+
+    def get_preferred_tool_sources(self):
+        """Get tool source ordering for resolution."""
+        return self.config.get(
+            "preferred_tool_sources",
+            ["managed", "configured", "system", "wsl"],
+        )
+
+    def get_tool_source_overrides(self):
+        """Get any per-tool source overrides."""
+        return self.config.get("tool_source_overrides", {})
     
     def get_project_root(self):
         """Get the project root directory (where config.json is located)"""

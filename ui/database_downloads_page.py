@@ -13,7 +13,7 @@ import os
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QFrame, QGroupBox, QProgressBar,
-    QTextEdit, QFileDialog, QMessageBox, QSplitter, QSizePolicy,
+    QTextEdit, QFileDialog, QMessageBox, QSplitter,
     QTabWidget, QLineEdit
 )
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -519,6 +519,7 @@ class DatabaseDownloadsPage(QWidget):
 
     def _on_error(self, error_msg: str):
         t = get_theme()
+        self.progress_widget.setVisible(False)
         self.status_label.setText("Error")
         self.status_label.setStyleSheet(f"color: {t.get('error')}; font-weight: bold;")
 

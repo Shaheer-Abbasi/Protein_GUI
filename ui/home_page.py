@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QGridLayout, QFrame, QScrollArea, QSizePolicy
 )
 from PyQt5.QtCore import Qt, pyqtSignal
@@ -94,6 +94,36 @@ class HomePage(QWidget):
         banner_layout.addWidget(title)
         banner_layout.addWidget(subtitle)
 
+        # External tools: centered row above main services, visually separated
+        tools_heading = QLabel("External command-line tools")
+        tools_heading.setProperty("class", "heading")
+        tools_heading.setAlignment(Qt.AlignCenter)
+
+        # Same horizontal width as one column of the 2-column grid below (50% of row),
+        # still visually centered via stretch factors 1 : 2 : 1 (middle takes half).
+        tools_row = QHBoxLayout()
+        tools_row.setSpacing(0)
+        tools_row.addStretch(1)
+        tools_wrap = QWidget()
+        tools_wrap.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        tw_layout = QVBoxLayout(tools_wrap)
+        tw_layout.setContentsMargins(0, 0, 0, 0)
+        tools_accent = PAGE_ACCENTS.get("tools", t.get("accent"))
+        tools_card = ServiceCard(
+            "Tools",
+            "Install BLAST+, MMseqs2, blastdbcmd, and Clustal Omega for searches, clustering, and alignment",
+            tools_accent,
+            "tool",
+        )
+        tools_card.clicked.connect(lambda: self.service_selected.emit("tools"))
+        tw_layout.addWidget(tools_card)
+        tools_row.addWidget(tools_wrap, 2)
+        tools_row.addStretch(1)
+
+        section_divider = QFrame()
+        section_divider.setFrameShape(QFrame.HLine)
+        section_divider.setFrameShadow(QFrame.Sunken)
+
         # Section header
         section_header = QLabel("Available Services")
         section_header.setProperty("class", "heading")
@@ -123,6 +153,12 @@ class HomePage(QWidget):
             grid.addWidget(card, idx // 2, idx % 2)
 
         layout.addWidget(banner)
+        layout.addSpacing(12)
+        layout.addWidget(tools_heading)
+        layout.addLayout(tools_row)
+        layout.addSpacing(20)
+        layout.addWidget(section_divider)
+        layout.addSpacing(20)
         layout.addWidget(section_header)
         layout.addWidget(grid_widget)
         layout.addStretch()

@@ -5,11 +5,9 @@ import tempfile
 import shutil
 from PyQt5.QtCore import QThread, pyqtSignal
 
+from core.tool_runtime import ToolRuntimeError, get_tool_runtime
 from core.wsl_utils import (
     is_windows,
-    is_wsl_available,
-    convert_path_for_tool,
-    run_wsl_command,
     WSLError,
     get_disk_space_wsl,
     get_platform_tool_install_hint
@@ -46,13 +44,15 @@ class DatabaseConversionWorker(QThread):
         temp_fasta = None
         
         try:
-            # Check environment availability
-            if not is_wsl_available():
+            runtime = get_tool_runtime()
+            blastdbcmd_resolution = runtime.resolve_tool("blastdbcmd")
+            mmseqs_resolution = runtime.resolve_tool("mmseqs")
+            if not blastdbcmd_resolution.executable or not mmseqs_resolution.executable:
                 if is_windows():
                     self.error.emit(
                         self.db_name,
-                        "WSL is not available. Please install Windows Subsystem for Linux.\n\n"
-                        "You can use BLAST search instead, or install WSL to use MMseqs2."
+                        "Required database conversion tools are not available.\n\n"
+                        "On Windows, MMseqs2 conversion currently relies on WSL-backed tools."
                     )
                 else:
                     self.error.emit(
@@ -70,7 +70,7 @@ class DatabaseConversionWorker(QThread):
             # Step 1: Check disk space
             self.progress.emit("Checking disk space...", 5)
             
-            check_path = convert_path_for_tool(self.output_dir) if is_windows() else self.output_dir
+            check_path = runtime.prepare_path(mmseqs_resolution, self.output_dir)
             available, total = get_disk_space_wsl(check_path)
             if available is not None and available < 1_000_000_000:
                 self.error.emit(
@@ -91,16 +91,18 @@ class DatabaseConversionWorker(QThread):
             os.makedirs(temp_dir, exist_ok=True)
             temp_fasta_native = os.path.join(temp_dir, f'{self.db_name}.fasta')
             
-            blast_db_tool = convert_path_for_tool(self.blast_db_path)
-            temp_fasta_tool = convert_path_for_tool(temp_fasta_native)
+            blast_db_tool = runtime.prepare_path(blastdbcmd_resolution, self.blast_db_path)
+            temp_fasta_tool = runtime.prepare_path(blastdbcmd_resolution, temp_fasta_native)
             
             # Run blastdbcmd to extract FASTA
             self.progress.emit("Running blastdbcmd to extract sequences...", 20)
             
-            blastdbcmd_cmd = f'blastdbcmd -db "{blast_db_tool}" -entry all -out "{temp_fasta_tool}"'
-            
             try:
-                result = run_wsl_command(blastdbcmd_cmd, timeout=3600)
+                result = runtime.run_resolved(
+                    blastdbcmd_resolution,
+                    ["-db", blast_db_tool, "-entry", "all", "-out", temp_fasta_tool],
+                    timeout=3600,
+                )
                 
                 if result.returncode != 0:
                     error_msg = result.stderr if result.stderr else "Unknown error"
@@ -123,7 +125,7 @@ class DatabaseConversionWorker(QThread):
                             f"Failed to extract sequences from BLAST database:\n\n{error_msg}"
                         )
                     return
-            except WSLError as e:
+            except (WSLError, ToolRuntimeError) as e:
                 self.error.emit(self.db_name, f"Command failed:\n\n{str(e)}")
                 return
             
@@ -162,7 +164,8 @@ class DatabaseConversionWorker(QThread):
             self.progress.emit("Converting to MMseqs2 format...", 50)
             
             mmseqs_db_native = os.path.join(self.output_dir, self.db_name)
-            mmseqs_db_tool = convert_path_for_tool(mmseqs_db_native)
+            mmseqs_db_tool = runtime.prepare_path(mmseqs_resolution, mmseqs_db_native)
+            temp_fasta_for_mmseqs = runtime.prepare_path(mmseqs_resolution, temp_fasta_native)
             
             if os.path.exists(mmseqs_db_native):
                 self.progress.emit("Removing old database...", 45)
@@ -170,10 +173,12 @@ class DatabaseConversionWorker(QThread):
             
             self.progress.emit("Creating MMseqs2 database...", 60)
             
-            mmseqs_cmd = f'mmseqs createdb "{temp_fasta_tool}" "{mmseqs_db_tool}"'
-            
             try:
-                result = run_wsl_command(mmseqs_cmd, timeout=3600)
+                result = runtime.run_resolved(
+                    mmseqs_resolution,
+                    ["createdb", temp_fasta_for_mmseqs, mmseqs_db_tool],
+                    timeout=3600,
+                )
                 
                 if result.returncode != 0:
                     error_msg = result.stderr if result.stderr else "Unknown error"
@@ -190,7 +195,7 @@ class DatabaseConversionWorker(QThread):
                             f"Failed to create MMseqs2 database:\n\n{error_msg}"
                         )
                     return
-            except WSLError as e:
+            except (WSLError, ToolRuntimeError) as e:
                 self.error.emit(self.db_name, f"Command failed:\n\n{str(e)}")
                 return
             

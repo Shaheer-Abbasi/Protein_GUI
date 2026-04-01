@@ -24,6 +24,8 @@ from core.wsl_utils import (
     is_wsl_available, check_mmseqs_installation,
     check_blastdbcmd_installation, get_platform_tool_install_hint,
 )
+from core.tool_install_worker import ToolInstallWorker
+from core.tool_runtime import get_tool_runtime
 from ui.dialogs.conversion_progress_dialog import ConversionProgressDialog
 from ui.dialogs.protein_search_dialog import ProteinSearchDialog
 from ui.dialogs.cluster_selection_dialog import ClusterSelectionDialog
@@ -60,6 +62,8 @@ class ProteinSearchPage(QWidget):
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "blast_databases")
         self.installed_databases = set()
         self.custom_blast_db_path = None
+        self.tool_install_worker = None
+        self._pending_tool_action = None
 
         self._init_ui()
 
@@ -689,25 +693,77 @@ class ProteinSearchPage(QWidget):
 
     def _check_mmseqs_requirements(self):
         t = get_theme()
-        if not is_wsl_available():
-            self.mmseqs_info_label.setText("Command execution environment not available.")
+        runtime = get_tool_runtime()
+        missing = runtime.get_missing_tools_for_feature("protein_mmseqs")
+        if missing:
+            self.mmseqs_info_label.setText(
+                "MMseqs2 mode needs MMseqs2 and blastdbcmd. Use the Tools tab to install them, "
+                "or click Run and the app will prompt to install what is missing."
+            )
             self.mmseqs_info_label.setStyleSheet(f"color:{t.get('warning')};")
             return
-        ok, ver, path = check_mmseqs_installation()
-        if not ok:
-            hint = get_platform_tool_install_hint("mmseqs")
-            self.mmseqs_info_label.setText(f"MMseqs2 not found. {hint}")
-            self.mmseqs_info_label.setStyleSheet(f"color:{t.get('warning')};")
-            return
-        bok, bver, bpath = check_blastdbcmd_installation()
-        if not bok:
-            hint = get_platform_tool_install_hint("blastdbcmd")
-            self.mmseqs_info_label.setText(f"blastdbcmd not found. {hint}")
-            self.mmseqs_info_label.setStyleSheet(f"color:{t.get('warning')};")
-            return
+        status = runtime.get_tool_status("mmseqs")
         self.mmseqs_info_label.setText(
-            f"MMseqs2 ready ({ver or 'installed'}). First-time DB selection triggers auto-conversion.")
+            f"MMseqs2 ready ({status.version or 'installed'}). First-time DB selection triggers auto-conversion."
+        )
         self.mmseqs_info_label.setStyleSheet(f"color:{t.get('success')};")
+
+    def _ensure_feature_tools(self, feature_id: str, retry_callback):
+        runtime = get_tool_runtime()
+        missing = runtime.get_missing_tools_for_feature(feature_id)
+        if not missing:
+            return True
+
+        installable = runtime.get_installable_tools(missing)
+        if installable:
+            pretty = ", ".join(missing)
+            reply = QMessageBox.question(
+                self,
+                "Install Required Tools",
+                f"This feature requires the following tools: {pretty}.\n\nInstall them now?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return False
+
+            self._pending_tool_action = retry_callback
+            self.process_button.setEnabled(False)
+            self.status_label.setText("Installing required tools...")
+            self.tool_install_worker = ToolInstallWorker(installable)
+            self.tool_install_worker.progress.connect(
+                lambda current, total, status: self.status_label.setText(status)
+            )
+            self.tool_install_worker.error.connect(self._on_tool_install_error)
+            self.tool_install_worker.finished.connect(self._on_tool_install_finished)
+            self.tool_install_worker.start()
+            return False
+
+        pretty = ", ".join(missing)
+        QMessageBox.warning(
+            self,
+            "Tools Missing",
+            f"The required tools are missing: {pretty}\n\n"
+            "Managed installs are not available for them on this platform yet. "
+            "Please use the Tools tab or a system/WSL install.",
+        )
+        return False
+
+    def _on_tool_install_finished(self, _result):
+        self.tool_install_worker = None
+        self.process_button.setEnabled(True)
+        self._check_mmseqs_requirements()
+        self.status_label.setText("Required tools installed.")
+        pending = self._pending_tool_action
+        self._pending_tool_action = None
+        if pending is not None:
+            pending()
+
+    def _on_tool_install_error(self, error_msg: str):
+        self.tool_install_worker = None
+        self.process_button.setEnabled(True)
+        self._pending_tool_action = None
+        QMessageBox.critical(self, "Tool Install Error", error_msg)
+        self.status_label.setText("Tool installation failed.")
 
     def _browse_ncbi_database_path(self):
         f, _ = QFileDialog.getOpenFileName(self, "Select BLAST Database File", "",
@@ -813,6 +869,8 @@ class ProteinSearchPage(QWidget):
             self._run_mmseqs()
 
     def _run_blast(self):
+        if not self._ensure_feature_tools("protein_blast", self._run_blast):
+            return
         sequence = self._validate_sequence()
         if not sequence:
             return
@@ -843,6 +901,8 @@ class ProteinSearchPage(QWidget):
         self.blast_worker.start()
 
     def _run_mmseqs(self):
+        if not self._ensure_feature_tools("protein_mmseqs", self._run_mmseqs):
+            return
         sequence = self._validate_sequence()
         if not sequence:
             return

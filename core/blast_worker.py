@@ -4,6 +4,7 @@ import os
 from PyQt5.QtCore import QThread, pyqtSignal
 from Bio.Blast import NCBIXML
 from core.config_manager import get_config
+from core.tool_runtime import get_tool_runtime
 from utils.results_parser import BLASTResultsParser
 
 
@@ -46,16 +47,22 @@ class BLASTWorker(QThread):
             
             output_path = tempfile.mktemp(suffix='.xml')
             
-            # Get BLASTP path from config (portable across machines)
+            # Resolve BLASTP through the shared runtime layer.
             config = get_config()
-            blastp_path = config.get_blast_path()
+            runtime = get_tool_runtime()
+            blast_resolution = runtime.resolve_tool("blastp")
+            if not blast_resolution.executable:
+                self.error.emit("BLASTP is not available. Install BLAST+ or configure a valid executable path.")
+                return
+
+            query_path_tool = runtime.prepare_path(blast_resolution, query_path)
+            output_path_tool = runtime.prepare_path(blast_resolution, output_path)
             
             # Build command based on remote vs local database
             cmd = [
-                blastp_path,
-                '-query', query_path,
+                '-query', query_path_tool,
                 '-outfmt', '5',  # XML format for Biopython parsing
-                '-out', output_path,
+                '-out', output_path_tool,
                 # Advanced parameters
                 '-evalue', str(self.params['evalue']),
                 '-max_target_seqs', str(self.params['max_target_seqs']),
@@ -88,10 +95,10 @@ class BLASTWorker(QThread):
                     blast_db_dir = config.get_blast_db_dir()
                     local_db = os.path.join(blast_db_dir, self.database)
                 
-                cmd.extend(['-db', local_db])
+                cmd.extend(['-db', runtime.prepare_path(blast_resolution, local_db)])
             
             # Execute BLAST
-            subprocess.run(cmd, check=True, capture_output=True, text=True)
+            runtime.run_resolved(blast_resolution, cmd, check=True, capture_output=True, text=True)
             
             # Parse results - get both HTML and structured data
             html_results = self.parse_blast_xml(output_path)

@@ -5,15 +5,11 @@ import tempfile
 import uuid
 from PyQt5.QtCore import QThread, pyqtSignal
 
+from core.tool_runtime import ToolRuntimeError, get_tool_runtime
 from core.wsl_utils import (
     is_windows,
-    is_wsl_available, 
-    check_wsl_command, 
     run_wsl_command, 
-    windows_path_to_wsl,
     WSLError,
-    warmup_wsl,
-    get_platform_tool_install_hint
 )
 
 
@@ -29,24 +25,8 @@ def check_clustalo_installation():
     Returns:
         tuple: (installed: bool, version: str or None, path: str or None)
     """
-    if is_windows() and not is_wsl_available():
-        return False, None, None
-    
-    warmup_wsl()
-    
-    exists, path = check_wsl_command('clustalo')
-    if not exists:
-        return False, None, None
-    
-    try:
-        result = run_wsl_command(['clustalo', '--version'], timeout=30)
-        if result.returncode == 0:
-            version = result.stdout.strip()
-            return True, version, path
-    except WSLError:
-        pass
-    
-    return True, None, path
+    status = get_tool_runtime().get_tool_status("clustalo")
+    return status.installed, status.version, status.executable_path
 
 
 class AlignmentWorker(QThread):
@@ -104,7 +84,14 @@ class AlignmentWorker(QThread):
             if self._cancelled:
                 return
             
-            if is_windows():
+            runtime = get_tool_runtime()
+            resolution = runtime.resolve_tool("clustalo")
+            if not resolution.executable:
+                raise AlignmentError(
+                    "Clustal Omega is not available. Install it from the app or configure a valid executable path."
+                )
+
+            if resolution.backend == "wsl":
                 self.progress.emit(10, f"Found {seq_count} sequences. Copying to WSL...")
                 tool_input_path = self._copy_to_wsl_temp()
             else:
@@ -116,14 +103,14 @@ class AlignmentWorker(QThread):
             if self._cancelled:
                 return
             
-            tool_output_path = self._run_clustalo(tool_input_path, seq_count)
+            tool_output_path = self._run_clustalo(resolution, tool_input_path, seq_count)
             
             self.progress.emit(80, "Reading alignment results...")
             
             if self._cancelled:
                 return
             
-            if is_windows():
+            if resolution.backend == "wsl":
                 aligned_content = self._read_wsl_output(tool_output_path)
             else:
                 aligned_content = self._read_native_output(tool_output_path)
@@ -192,20 +179,19 @@ class AlignmentWorker(QThread):
         self._temp_files.append(('wsl', wsl_input_path))
         return wsl_input_path
     
-    def _run_clustalo(self, input_path, seq_count):
+    def _run_clustalo(self, resolution, input_path, seq_count):
         """Run Clustal Omega alignment"""
         unique_id = str(uuid.uuid4())[:8]
         
-        if is_windows():
+        if resolution.backend == "wsl":
             output_path = f"/tmp/alignment_output_{unique_id}.aln"
         else:
             output_path = os.path.join(tempfile.gettempdir(), f"alignment_output_{unique_id}.aln")
         
         cmd_parts = [
-            'clustalo',
-            '-i', input_path,
-            '-o', output_path,
-            f'--outfmt={self.output_format}'
+            "-i", input_path,
+            "-o", output_path,
+            f"--outfmt={self.output_format}",
         ]
         
         if self.force:
@@ -220,19 +206,18 @@ class AlignmentWorker(QThread):
         if self.threads:
             cmd_parts.extend(['--threads', str(self.threads)])
         
-        cmd_parts.append('--verbose')
-        
-        cmd = ' '.join(cmd_parts)
+        cmd_parts.append("--verbose")
+
         timeout = max(self.DEFAULT_TIMEOUT, seq_count * 2)
         
         try:
-            result = run_wsl_command(cmd, timeout=timeout)
+            result = get_tool_runtime().run_resolved(resolution, cmd_parts, timeout=timeout)
             
             if result.returncode != 0:
                 error_msg = result.stderr if result.stderr else result.stdout
                 raise AlignmentError(f"Clustal Omega failed:\n{error_msg}")
                 
-        except WSLError as e:
+        except (WSLError, ToolRuntimeError) as e:
             if "timed out" in str(e).lower():
                 raise AlignmentError(
                     f"Alignment timed out after {timeout} seconds.\n"
@@ -240,7 +225,7 @@ class AlignmentWorker(QThread):
                 )
             raise AlignmentError(f"Execution error: {str(e)}")
         
-        file_type = 'wsl' if is_windows() else 'native'
+        file_type = 'wsl' if resolution.backend == "wsl" else 'native'
         self._temp_files.append((file_type, output_path))
         return output_path
     

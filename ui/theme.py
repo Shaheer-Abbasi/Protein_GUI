@@ -133,6 +133,7 @@ PAGE_ACCENTS = {
     "clustering":  "#E67E22",
     "alignment":   "#1ABC9C",
     "motif":       "#E91E63",
+    "tools":       "#607D8B",
     "database":    "#00897B",
 }
 

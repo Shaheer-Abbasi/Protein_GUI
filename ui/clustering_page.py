@@ -16,7 +16,8 @@ from ui.icons import feather_icon, set_button_icon
 from core.clustering_worker import ClusteringWorker
 from core.clustering_manager import validate_fasta_file, export_clustering_tsv, get_cluster_table_data
 from core.clustering_visualizer import create_distribution_chart, create_text_summary, export_chart_html
-from core.wsl_utils import is_wsl_available, check_mmseqs_installation, warmup_wsl, get_platform_tool_install_hint
+from core.tool_install_worker import ToolInstallWorker
+from core.tool_runtime import get_tool_runtime
 from ui.dialogs.chart_maximize_dialog import ChartMaximizeDialog
 
 
@@ -35,9 +36,9 @@ class ClusteringPage(QWidget):
         self.search_start_time = None
         self.is_temp_fasta = False
         self.loaded_from_search = False
+        self.tool_install_worker = None
+        self._pending_tool_action = None
         self._init_ui()
-
-        QTimer.singleShot(100, lambda: warmup_wsl())
         QTimer.singleShot(2000, self.check_system_requirements)
 
     def _init_ui(self):
@@ -320,34 +321,78 @@ class ClusteringPage(QWidget):
     # ── System checks ─────────────────────────────────────────────
 
     def check_system_requirements(self):
-        warmup_wsl()
         t = get_theme()
+        runtime = get_tool_runtime()
 
-        if not is_wsl_available():
-            self.warning_label.setText(
-                "Command execution environment not available. "
-                "Please check your system setup to use this feature.")
-            self.warning_label.setStyleSheet(
-                f"padding:10px; background-color:{t.get('warning_bg')}; "
-                f"border:1px solid {t.get('warning')}; border-radius:5px; "
-                f"color:{t.get('text_primary')};")
-            self.warning_label.show()
-            self.run_button.setEnabled(False)
-            return
-
-        ok, ver, path = check_mmseqs_installation()
+        status = runtime.get_tool_status("mmseqs")
+        ok = status.installed
         if not ok:
-            hint = get_platform_tool_install_hint('mmseqs')
-            self.warning_label.setText(f"MMseqs2 not found. {hint}")
+            self.warning_label.setText(
+                "MMseqs2 is not currently available. Use the Tools tab to install it, "
+                "or click Run and the app will prompt to install it."
+            )
             self.warning_label.setStyleSheet(
                 f"padding:10px; background-color:{t.get('warning_bg')}; "
                 f"border:1px solid {t.get('warning')}; border-radius:5px; "
                 f"color:{t.get('text_primary')};")
             self.warning_label.show()
-            self.run_button.setEnabled(False)
+            self.run_button.setEnabled(bool(runtime.get_installable_tools(["mmseqs"])))
             return
 
         self.warning_label.hide()
+        self.run_button.setEnabled(bool(self.fasta_path))
+
+    def _ensure_clustering_tools(self):
+        runtime = get_tool_runtime()
+        missing = runtime.get_missing_tools_for_feature("clustering")
+        if not missing:
+            return True
+
+        installable = runtime.get_installable_tools(missing)
+        if installable:
+            reply = QMessageBox.question(
+                self,
+                "Install Required Tools",
+                "Clustering requires MMseqs2.\n\nInstall it now?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return False
+            self._pending_tool_action = self.run_clustering
+            self.run_button.setEnabled(False)
+            self.status_label.setText("Installing required tools...")
+            self.tool_install_worker = ToolInstallWorker(installable)
+            self.tool_install_worker.progress.connect(
+                lambda current, total, status: self.status_label.setText(status)
+            )
+            self.tool_install_worker.finished.connect(self._on_tool_install_finished)
+            self.tool_install_worker.error.connect(self._on_tool_install_error)
+            self.tool_install_worker.start()
+            return False
+
+        QMessageBox.warning(
+            self,
+            "Tool Missing",
+            "MMseqs2 is not available on this system and cannot be installed automatically here.",
+        )
+        return False
+
+    def _on_tool_install_finished(self, _result):
+        self.tool_install_worker = None
+        self.run_button.setEnabled(True)
+        self.check_system_requirements()
+        self.status_label.setText("Required tools installed.")
+        pending = self._pending_tool_action
+        self._pending_tool_action = None
+        if pending is not None:
+            pending()
+
+    def _on_tool_install_error(self, error_msg):
+        self.tool_install_worker = None
+        self.run_button.setEnabled(True)
+        self._pending_tool_action = None
+        self.status_label.setText("Tool installation failed.")
+        QMessageBox.critical(self, "Tool Install Error", error_msg)
 
     # ── File selection ────────────────────────────────────────────
 
@@ -407,6 +452,8 @@ class ClusteringPage(QWidget):
     # ── Run clustering ────────────────────────────────────────────
 
     def run_clustering(self):
+        if not self._ensure_clustering_tools():
+            return
         if not self.fasta_path:
             QMessageBox.warning(self, "No File", "Please select a FASTA file first.")
             return

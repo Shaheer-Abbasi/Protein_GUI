@@ -13,7 +13,8 @@ from PyQt5.QtGui import QFont
 
 from ui.theme import get_theme
 from ui.icons import feather_icon, set_button_icon
-from core.wsl_utils import is_wsl_available, warmup_wsl, get_platform_tool_install_hint
+from core.tool_install_worker import ToolInstallWorker
+from core.tool_runtime import get_tool_runtime
 from core.alignment_worker import (
     AlignmentWorker,
     check_clustalo_installation,
@@ -36,9 +37,10 @@ class AlignmentPage(QWidget):
         self.aligned_content = None
         self.loaded_sequences = []
         self.is_temp_fasta = False
+        self.tool_install_worker = None
+        self._pending_tool_action = None
         self._init_ui()
 
-        QTimer.singleShot(100, lambda: warmup_wsl())
         QTimer.singleShot(2000, self.check_system_requirements)
 
     def _init_ui(self):
@@ -286,28 +288,71 @@ class AlignmentPage(QWidget):
 
     # ── System requirements ──────────────────────────────────────
     def check_system_requirements(self):
-        warmup_wsl()
-
-        if not is_wsl_available():
-            self.warning_label.setText(
-                "Command execution environment not available.\n"
-                "Please check your system setup to use this feature."
-            )
-            self.warning_label.show()
-            self.run_button.setEnabled(False)
-            return
-
+        runtime = get_tool_runtime()
         clustalo_installed, version, path = check_clustalo_installation()
         if not clustalo_installed:
-            hint = get_platform_tool_install_hint('clustalo')
             self.warning_label.setText(
-                f"Clustal Omega not found. Please install it to use alignment.\n{hint}"
+                "Clustal Omega is not currently available. Use the Tools tab to install it, "
+                "or click Run and the app will prompt to install it."
             )
             self.warning_label.show()
-            self.run_button.setEnabled(False)
+            self.run_button.setEnabled(bool(runtime.get_installable_tools(["clustalo"])))
             return
 
         self.warning_label.hide()
+        self.run_button.setEnabled(True)
+
+    def _ensure_alignment_tools(self):
+        runtime = get_tool_runtime()
+        missing = runtime.get_missing_tools_for_feature("alignment")
+        if not missing:
+            return True
+
+        installable = runtime.get_installable_tools(missing)
+        if installable:
+            reply = QMessageBox.question(
+                self,
+                "Install Required Tools",
+                "Alignment requires Clustal Omega.\n\nInstall it now?",
+                QMessageBox.Yes | QMessageBox.No,
+            )
+            if reply != QMessageBox.Yes:
+                return False
+            self._pending_tool_action = self.run_alignment
+            self.run_button.setEnabled(False)
+            self.status_label.setText("Installing required tools...")
+            self.tool_install_worker = ToolInstallWorker(installable)
+            self.tool_install_worker.progress.connect(
+                lambda current, total, status: self.status_label.setText(status)
+            )
+            self.tool_install_worker.finished.connect(self._on_tool_install_finished)
+            self.tool_install_worker.error.connect(self._on_tool_install_error)
+            self.tool_install_worker.start()
+            return False
+
+        QMessageBox.warning(
+            self,
+            "Tool Missing",
+            "Clustal Omega is not available on this system and cannot be installed automatically here.",
+        )
+        return False
+
+    def _on_tool_install_finished(self, _result):
+        self.tool_install_worker = None
+        self.run_button.setEnabled(True)
+        self.check_system_requirements()
+        self.status_label.setText("Required tools installed.")
+        pending = self._pending_tool_action
+        self._pending_tool_action = None
+        if pending is not None:
+            pending()
+
+    def _on_tool_install_error(self, error_msg):
+        self.tool_install_worker = None
+        self.run_button.setEnabled(True)
+        self._pending_tool_action = None
+        self.status_label.setText("Tool installation failed.")
+        QMessageBox.critical(self, "Tool Install Error", error_msg)
 
     # ── File browsing ────────────────────────────────────────────
     def browse_fasta_file(self):
@@ -344,6 +389,8 @@ class AlignmentPage(QWidget):
 
     # ── Run alignment ────────────────────────────────────────────
     def run_alignment(self):
+        if not self._ensure_alignment_tools():
+            return
         if self.paste_radio.isChecked():
             paste_content = self.paste_text.toPlainText().strip()
             if not paste_content:
