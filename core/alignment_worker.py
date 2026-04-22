@@ -24,6 +24,8 @@ MAX_SEQUENCES_BY_TOOL = {
     "mafft": 2000,
     "muscle": 2000,
     "famsa": 100_000,
+    "famsa_gpu": 100_000,
+    "twilight": 1_000_000,
 }
 
 
@@ -37,6 +39,8 @@ def aligner_display_name(tool_id: str) -> str:
         "mafft": "MAFFT",
         "muscle": "MUSCLE",
         "famsa": "FAMSA",
+        "famsa_gpu": "FAMSA (GPU)",
+        "twilight": "TWILIGHT",
     }
     return names.get(tool_id, tool_id)
 
@@ -183,6 +187,12 @@ class AlignmentWorker(QThread):
             return self._read_output(resolution, out_path)
         if self.tool_id == "famsa":
             out_path = self._run_famsa(resolution, input_path, seq_count)
+            return self._read_output(resolution, out_path)
+        if self.tool_id == "famsa_gpu":
+            out_path = self._run_famsa_gpu(resolution, input_path, seq_count)
+            return self._read_output(resolution, out_path)
+        if self.tool_id == "twilight":
+            out_path = self._run_twilight(resolution, input_path, seq_count)
             return self._read_output(resolution, out_path)
         raise AlignmentError(f"Unknown aligner: {self.tool_id}")
 
@@ -522,6 +532,55 @@ class AlignmentWorker(QThread):
         timeout = self._alignment_timeout(seq_count)
         self._run_subprocess_with_live_feedback(
             resolution, cmd_parts, timeout, "FAMSA", capture_stdout=False
+        )
+
+        file_type = "wsl" if resolution.backend == "wsl" else "native"
+        self._temp_files.append((file_type, output_path))
+        return output_path
+
+    def _run_famsa_gpu(self, resolution, input_path, seq_count):
+        """Run FAMSA with GPU acceleration; same CLI as CPU FAMSA."""
+        unique_id = str(uuid.uuid4())[:8]
+        if resolution.backend == "wsl":
+            output_path = f"/tmp/alignment_output_{unique_id}.fasta"
+        else:
+            output_path = os.path.join(tempfile.gettempdir(), f"alignment_output_{unique_id}.fasta")
+
+        cmd_parts = ["-t", str(self._effective_threads())]
+        if self.famsa_medoid_tree:
+            cmd_parts.append("--medoid-tree")
+        cmd_parts.extend([input_path, output_path])
+
+        timeout = self._alignment_timeout(seq_count)
+        self._run_subprocess_with_live_feedback(
+            resolution, cmd_parts, timeout, "FAMSA (GPU)", capture_stdout=False
+        )
+
+        file_type = "wsl" if resolution.backend == "wsl" else "native"
+        self._temp_files.append((file_type, output_path))
+        return output_path
+
+    def _run_twilight(self, resolution, input_path, seq_count):
+        """Run TWILIGHT MSA in iterative mode (no guide tree needed)."""
+        unique_id = str(uuid.uuid4())[:8]
+        if resolution.backend == "wsl":
+            output_path = f"/tmp/alignment_output_{unique_id}.fasta"
+        else:
+            output_path = os.path.join(tempfile.gettempdir(), f"alignment_output_{unique_id}.fasta")
+
+        cmd_parts = [
+            "-i", input_path,
+            "-o", output_path,
+            "--iterative",
+        ]
+
+        from core.array_backend import cuda_available
+        if cuda_available():
+            cmd_parts.append("--gpu")
+
+        timeout = self._alignment_timeout(seq_count) * 2
+        self._run_subprocess_with_live_feedback(
+            resolution, cmd_parts, timeout, "TWILIGHT", capture_stdout=False
         )
 
         file_type = "wsl" if resolution.backend == "wsl" else "native"

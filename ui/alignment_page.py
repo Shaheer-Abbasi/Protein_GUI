@@ -160,6 +160,8 @@ class AlignmentPage(QWidget):
         self.tool_combo.addItem("MAFFT", "mafft")
         self.tool_combo.addItem("MUSCLE", "muscle")
         self.tool_combo.addItem("FAMSA", "famsa")
+        self.tool_combo.addItem("FAMSA (GPU)", "famsa_gpu")
+        self.tool_combo.addItem("TWILIGHT", "twilight")
         self.tool_combo.setToolTip("Choose the multiple sequence alignment program")
         tool_row.addWidget(self.tool_combo)
         tool_row.addStretch()
@@ -550,7 +552,7 @@ class AlignmentPage(QWidget):
         tool_id = self._selected_tool_id()
         self.clustalo_params_widget.setVisible(tool_id == "clustalo")
         self.mafft_params_widget.setVisible(tool_id == "mafft")
-        self.famsa_params_widget.setVisible(tool_id == "famsa")
+        self.famsa_params_widget.setVisible(tool_id in ("famsa", "famsa_gpu"))
         self._refresh_output_format_combo()
         self.check_system_requirements()
         if self.input_fasta_path and os.path.exists(self.input_fasta_path):

@@ -19,6 +19,8 @@ from core.db_definitions import (
     is_remote_blastn_database_supported,
 )
 from core.blastn_worker import BLASTNWorker
+from core.mmseqs_gpu_search_worker import MMseqsGPUSearchWorker
+from core.array_backend import cuda_available
 from core.config_manager import get_config
 from core.tool_install_worker import ToolInstallWorker
 from core.tool_runtime import get_tool_runtime
@@ -70,9 +72,48 @@ class BLASTNPage(QWidget):
         form.setContentsMargins(28, 24, 28, 16)
         form.setSpacing(16)
 
-        title = QLabel("BLASTN Nucleotide Search")
+        title = QLabel("Nucleotide Search")
         title.setProperty("class", "title")
         form.addWidget(title)
+
+        # ── Tool selector ────────────────────────────────────────
+        tool_group = QGroupBox("Search Tool")
+        tg = QHBoxLayout()
+        self._tool_group = QButtonGroup()
+        self.blastn_tool_radio = QRadioButton("BLASTN")
+        self.mmseqs_gpu_tool_radio = QRadioButton("MMseqs2 GPU")
+        self.blastn_tool_radio.setChecked(True)
+        self._tool_group.addButton(self.blastn_tool_radio, 0)
+        self._tool_group.addButton(self.mmseqs_gpu_tool_radio, 1)
+        self.blastn_tool_radio.toggled.connect(self._on_tool_changed)
+        tg.addWidget(self.blastn_tool_radio)
+        tg.addWidget(self.mmseqs_gpu_tool_radio)
+
+        self.gpu_checkbox = QCheckBox("GPU Accelerated")
+        self.gpu_checkbox.setChecked(True)
+        self.gpu_checkbox.setVisible(False)
+        tg.addWidget(self.gpu_checkbox)
+
+        tg.addStretch()
+        tool_group.setLayout(tg)
+        form.addWidget(tool_group)
+
+        # ── MMseqs2 GPU database path ────────────────────────────
+        self.mmseqs_gpu_db_widget = QWidget()
+        mgw = QVBoxLayout(self.mmseqs_gpu_db_widget)
+        mgw.setContentsMargins(0, 0, 0, 0)
+        mg_row = QHBoxLayout()
+        mg_row.addWidget(QLabel("MMseqs2 DB path:"))
+        self.mmseqs_gpu_db_path = QLineEdit()
+        self.mmseqs_gpu_db_path.setPlaceholderText("Path to MMseqs2 nucleotide database")
+        mg_row.addWidget(self.mmseqs_gpu_db_path)
+        self.mmseqs_gpu_browse_btn = QPushButton("Browse")
+        self.mmseqs_gpu_browse_btn.setProperty("class", "secondary")
+        self.mmseqs_gpu_browse_btn.clicked.connect(self._browse_mmseqs_gpu_db)
+        mg_row.addWidget(self.mmseqs_gpu_browse_btn)
+        mgw.addLayout(mg_row)
+        self.mmseqs_gpu_db_widget.setVisible(False)
+        form.addWidget(self.mmseqs_gpu_db_widget)
 
         # ── Input method ────────────────────────────────────────
         input_group = QGroupBox("Sequence Input")
@@ -571,7 +612,75 @@ class BLASTNPage(QWidget):
         self.status_label.setText("Tool installation failed.")
         QMessageBox.critical(self, "Tool Install Error", error_msg)
 
+    def _on_tool_changed(self):
+        is_mmseqs = self.mmseqs_gpu_tool_radio.isChecked()
+        self.gpu_checkbox.setVisible(is_mmseqs and cuda_available())
+        self.mmseqs_gpu_db_widget.setVisible(is_mmseqs)
+        if is_mmseqs:
+            self.process_button.setText("Run MMseqs2 GPU Search")
+        else:
+            self.process_button.setText("Run BLASTN Search")
+
+    def _browse_mmseqs_gpu_db(self):
+        path = QFileDialog.getExistingDirectory(
+            self, "Select MMseqs2 nucleotide database directory")
+        if path:
+            self.mmseqs_gpu_db_path.setText(path)
+
+    def _run_mmseqs_gpu_search(self):
+        sequence = self.input_text.toPlainText().strip().upper()
+        if not sequence:
+            self.status_label.setText("Please enter a nucleotide sequence first.")
+            return
+        sequence = "".join(c for c in sequence if c.isalpha())
+        is_valid, invalid_chars = validate_nucleotide_sequence(sequence)
+        if not is_valid:
+            self.status_label.setText(
+                f"Invalid sequence: found characters {', '.join(sorted(invalid_chars))}")
+            return
+        db_path = self.mmseqs_gpu_db_path.text().strip()
+        if not db_path:
+            self.status_label.setText("Please select an MMseqs2 nucleotide database path.")
+            return
+
+        use_gpu = self.gpu_checkbox.isChecked() and self.gpu_checkbox.isVisible()
+        gpu_label = " (GPU)" if use_gpu else ""
+        self.process_button.setEnabled(False)
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.hide()
+        self.status_label.setText(f"Running MMseqs2{gpu_label} nucleotide search...")
+        self.results_panel.clear()
+        self.search_start_time = time.time()
+
+        self._mmseqs_gpu_worker = MMseqsGPUSearchWorker(
+            sequence, db_path,
+            search_type="nucleotide",
+            use_gpu=use_gpu,
+        )
+        self._mmseqs_gpu_worker.finished.connect(self._on_mmseqs_gpu_finished)
+        self._mmseqs_gpu_worker.error.connect(self.on_blast_error)
+        self._mmseqs_gpu_worker.start()
+
+    def _on_mmseqs_gpu_finished(self, results_html, results_data):
+        elapsed = time.time() - self.search_start_time if self.search_start_time else 0
+        self.current_results_html = results_html
+        self.current_results_data = results_data
+        gpu_label = " (GPU)" if self.gpu_checkbox.isChecked() else ""
+        self.current_query_info = {
+            "tool": f"MMseqs2{gpu_label}",
+            "query_name": self.current_sequence_metadata.get("id", "query"),
+            "query_length": str(len(self.input_text.toPlainText().strip())),
+            "database": self.mmseqs_gpu_db_path.text().strip(),
+            "search_time": f"{elapsed:.1f}s",
+        }
+        self.results_panel.set_results(results_data, self.current_query_info)
+        self.status_label.setText("Search complete!")
+        self.process_button.setEnabled(True)
+
     def run_blast(self):
+        if self.mmseqs_gpu_tool_radio.isChecked():
+            self._run_mmseqs_gpu_search()
+            return
         if not self._ensure_blastn_tools():
             return
         sequence = self.input_text.toPlainText().strip().upper()
