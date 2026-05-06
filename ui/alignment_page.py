@@ -32,6 +32,7 @@ from core.sca_worker import SCAWorker
 from core.pysca_manager import is_pysca_installed, check_pairwise_aligner, PySCAParams
 from core.pysca_worker import PySCAInstallWorker, PySCARunWorker, PySCAExportWorker
 from ui.widgets.sca_plots_widget import SCAChartsWidget, SCAChartsDialog
+from ui.widgets.pysca_results_widget import PySCAResultsDialog, PySCAResultsStripWidget
 
 
 class AlignmentPage(QWidget):
@@ -61,6 +62,7 @@ class AlignmentPage(QWidget):
         self._pysca_install_worker = None
         self._pysca_run_worker = None
         self._pysca_export_worker = None
+        self._pysca_results_dialog = None
         self._init_ui()
 
         QTimer.singleShot(2000, self.check_system_requirements)
@@ -395,6 +397,16 @@ class AlignmentPage(QWidget):
         self.pysca_gap_spin.setSingleStep(0.05)
         self.pysca_gap_spin.setMaximumWidth(80)
         cfg_row.addWidget(self.pysca_gap_spin)
+        cfg_row.addWidget(QLabel("Ref seq #:"))
+        self.pysca_ref_spin = QSpinBox()
+        self.pysca_ref_spin.setRange(0, 999_999)
+        self.pysca_ref_spin.setValue(0)
+        self.pysca_ref_spin.setMaximumWidth(72)
+        self.pysca_ref_spin.setToolTip(
+            "Reference sequence row in the MSA (0 = first), passed to scaProcessMSA as -i. "
+            "Ignored when a PDB ID is set. Using an explicit index avoids a known pySCA/NumPy issue in chooseRefSeq."
+        )
+        cfg_row.addWidget(self.pysca_ref_spin)
         cfg_row.addStretch()
         tier2_layout.addLayout(cfg_row)
 
@@ -436,6 +448,13 @@ class AlignmentPage(QWidget):
         self.pysca_log.setMaximumHeight(150)
         self.pysca_log.hide()
         tier2_layout.addWidget(self.pysca_log)
+
+        self.pysca_results_strip = PySCAResultsStripWidget()
+        self.pysca_results_strip.setVisible(False)
+        self.pysca_results_strip.open_results_requested.connect(
+            self._open_pysca_results_window
+        )
+        tier2_layout.addWidget(self.pysca_results_strip)
 
         tier2_group.setLayout(tier2_layout)
         sca_layout.addWidget(tier2_group)
@@ -997,9 +1016,11 @@ class AlignmentPage(QWidget):
             chain=self.pysca_chain_input.text().strip(),
             max_gap_frac_pos=self.pysca_gap_spin.value(),
             max_gap_frac_seq=self.pysca_gap_spin.value(),
+            ref_seq_index=int(self.pysca_ref_spin.value()),
         )
 
         self.pysca_run_btn.setEnabled(False)
+        self.pysca_results_strip.setVisible(False)
         self.pysca_progress.show()
         self.pysca_log.clear()
         self.pysca_log.show()
@@ -1014,6 +1035,20 @@ class AlignmentPage(QWidget):
         self._pysca_run_worker.error.connect(self._on_pysca_run_error)
         self._pysca_run_worker.start()
 
+    def _ensure_pysca_results_dialog(self) -> PySCAResultsDialog:
+        if self._pysca_results_dialog is None:
+            self._pysca_results_dialog = PySCAResultsDialog(self)
+        return self._pysca_results_dialog
+
+    def _open_pysca_results_window(self):
+        if not self._pysca_db_path or not os.path.isfile(self._pysca_db_path):
+            QMessageBox.information(self, "pySCA", "No pySCA results loaded yet.")
+            return
+        dlg = self._ensure_pysca_results_dialog()
+        if not dlg.ensure_loaded(self._pysca_db_path):
+            return
+        dlg.show_raised()
+
     def _on_pysca_run_log(self, msg):
         self.pysca_log.append(msg)
 
@@ -1026,6 +1061,16 @@ class AlignmentPage(QWidget):
             self.pysca_export_csv_btn.setEnabled(True)
             self.pysca_open_folder_btn.setEnabled(True)
             self.pysca_log.append("\n=== pySCA pipeline completed successfully ===")
+            dlg = self._ensure_pysca_results_dialog()
+            if dlg.load_db_path(result.db_path):
+                dlg.show_raised()
+                self.pysca_results_strip.set_status(
+                    "pySCA figures are shown in a separate window. "
+                    "Click below if you closed it."
+                )
+                self.pysca_results_strip.setVisible(True)
+            else:
+                self.pysca_results_strip.setVisible(False)
         else:
             self.pysca_log.append(f"\n=== pySCA FAILED ===\n{result.error_msg}")
             QMessageBox.warning(self, "pySCA", f"Pipeline failed:\n{result.error_msg}")

@@ -15,7 +15,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, List, Optional
 
 import numpy as np
 
@@ -34,6 +34,9 @@ class PySCAParams:
     norm: str = "frob"
     lbda: float = 0.03
     n_trials: int = 10
+    #: Reference sequence row in the MSA (0-based). Passed as ``scaProcessMSA -i``.
+    #: Default 0 avoids ``chooseRefSeq``, which can fail on NumPy 2.x with some pySCA trees.
+    ref_seq_index: int = 0
 
 
 @dataclass
@@ -46,6 +49,66 @@ class PySCAOutputs:
     success: bool = False
     error_msg: str = ""
     exported_files: list[str] = field(default_factory=list)
+
+
+def _sca_process_msa_p_args(params: PySCAParams) -> List[str]:
+    """
+    scaProcessMSA uses ``nargs=4`` for -p (four separate floats), not one string.
+    """
+    return [
+        str(params.max_gap_frac_pos),
+        str(params.max_gap_frac_seq),
+        str(params.min_seq_id),
+        str(params.max_seq_id),
+    ]
+
+
+def _find_sca_process_msa_executable() -> Optional[str]:
+    """The pySCA package installs console scripts, not ``python -m pysca.scaProcessMSA``."""
+    for name in ("scaProcessMSA", "sca-process-msa"):
+        path = shutil.which(name)
+        if path:
+            return path
+    return None
+
+
+def _build_sca_process_msa_cmd(
+    dst_fasta: str,
+    output_dir: str,
+    params: PySCAParams,
+    *,
+    executable: Optional[str] = None,
+) -> List[str]:
+    """
+    Prefer the real ``scaProcessMSA`` on PATH; there is no importable ``pysca.scaProcessMSA`` module.
+
+    When no PDB id is given, pass ``-i ref_seq_index`` so the reference row is fixed and
+    ``chooseRefSeq`` is not used (avoids a known NumPy broadcasting failure in some installs).
+    """
+    pargs = _sca_process_msa_p_args(params)
+    if executable:
+        cmd = [executable, "-a", dst_fasta, "-d", output_dir, "-p", *pargs]
+    elif (exe := _find_sca_process_msa_executable()):
+        cmd = [exe, "-a", dst_fasta, "-d", output_dir, "-p", *pargs]
+    else:
+        cmd = [
+            sys.executable,
+            "-m",
+            "pysca.scaProcessMSA",
+            "-a",
+            dst_fasta,
+            "-d",
+            output_dir,
+            "-p",
+            *pargs,
+        ]
+    if not (params.pdb_id and params.pdb_id.strip()):
+        cmd.extend(["-i", str(int(params.ref_seq_index))])
+    if params.pdb_id:
+        cmd.extend(["-s", params.pdb_id])
+    if params.chain:
+        cmd.extend(["-c", params.chain])
+    return cmd
 
 
 def is_pysca_installed() -> bool:
@@ -157,32 +220,23 @@ def run_pysca_pipeline(
     stem = Path(dst_fasta).stem
     db_path = os.path.join(output_dir, f"{stem}.db")
 
-    # ── Step 1: scaProcessMSA ────────────────────────────────────
-    cmd1 = [
-        sys.executable, "-m", "pysca.scaProcessMSA",
-        "-a", dst_fasta,
-        "-d", output_dir,
-        "-p", (
-            f"{params.max_gap_frac_pos},{params.max_gap_frac_seq},"
-            f"{params.min_seq_id},{params.max_seq_id}"
-        ),
-    ]
-    if params.pdb_id:
-        cmd1.extend(["-s", params.pdb_id])
-    if params.chain:
-        cmd1.extend(["-c", params.chain])
-
+    # ── Step 1: scaProcessMSA (``-p`` is nargs=4; ``-i`` avoids chooseRefSeq / NumPy issues) ──
+    cmd1 = _build_sca_process_msa_cmd(dst_fasta, output_dir, params)
     rc, out = _run_subprocess(cmd1, progress_cb, "scaProcessMSA")
     if rc != 0:
-        # Try the script name directly
-        cmd1[0:3] = ["scaProcessMSA"]
-        cmd1 = ["scaProcessMSA", "-a", dst_fasta, "-d", output_dir,
-                 "-p", f"{params.max_gap_frac_pos},{params.max_gap_frac_seq},{params.min_seq_id},{params.max_seq_id}"]
-        if params.pdb_id:
-            cmd1.extend(["-s", params.pdb_id])
-        if params.chain:
-            cmd1.extend(["-c", params.chain])
-        rc, out = _run_subprocess(cmd1, progress_cb, "scaProcessMSA (fallback)")
+        # If we had to use ``python -m`` (no script on PATH), try the real ``scaProcessMSA`` binary.
+        alt = _find_sca_process_msa_executable()
+        if (
+            alt
+            and len(cmd1) > 1
+            and cmd1[0] == sys.executable
+            and cmd1[1] == "-m"
+        ):
+            cmd1 = _build_sca_process_msa_cmd(
+                dst_fasta, output_dir, params, executable=alt
+            )
+            rc, out = _run_subprocess(cmd1, progress_cb, "scaProcessMSA (from PATH)")
+        # Do not fall back to ``-m`` after a real script failure — that module does not exist in pySCA.
         if rc != 0:
             result.error_msg = f"scaProcessMSA failed (exit {rc}):\n{out}"
             return result
@@ -260,7 +314,7 @@ def export_results(
     if progress_cb:
         progress_cb(f"Copied .db file to {dst_db}")
 
-    # Try to load and extract arrays
+    # Try to load and extract arrays (pySCA 6: nested "sca" / "sector" blocks)
     try:
         with open(db_path, "rb") as f:
             data = pickle.load(f)
@@ -269,7 +323,14 @@ def export_results(
             progress_cb(f"Could not read .db as pickle: {exc}")
         return exported
 
-    array_keys = {
+    Dsca = data.get("sca")
+    Dsect = data.get("sector")
+    if not isinstance(Dsca, dict):
+        Dsca = data  # flat fallback
+    if not isinstance(Dsect, dict):
+        Dsect = data
+
+    array_map = {
         "Csca": "sca_matrix",
         "Dsca": "sca_matrix_raw",
         "Di": "positional_conservation",
@@ -278,10 +339,12 @@ def export_results(
         "simMat": "sequence_similarity",
     }
 
-    for key, filename_base in array_keys.items():
-        if key not in data:
+    for key, filename_base in array_map.items():
+        arr = Dsca.get(key) if isinstance(Dsca, dict) else None
+        if arr is None and isinstance(data, dict):
+            arr = data.get(key)
+        if arr is None:
             continue
-        arr = data[key]
         if not isinstance(arr, np.ndarray):
             try:
                 arr = np.array(arr)
@@ -298,21 +361,42 @@ def export_results(
             if progress_cb:
                 progress_cb(f"Failed to export {key}: {exc}")
 
-    # Export sector lists if present
-    for key in ("ics", "icList"):
-        if key in data:
-            try:
-                ic_data = data[key]
-                txt_path = os.path.join(export_dir, "sectors.txt")
-                with open(txt_path, "w") as f:
-                    for i, sector in enumerate(ic_data):
-                        positions = ",".join(str(p) for p in sector)
-                        f.write(f"Sector {i + 1}: {positions}\n")
-                exported.append(txt_path)
+    # Vpica / sector-side arrays
+    if isinstance(Dsect, dict) and "Vpica" in Dsect:
+        try:
+            arr = np.asarray(Dsect["Vpica"])
+            if arr.ndim <= 2 and arr.size:
+                csv_path = os.path.join(export_dir, "ic_loadings.csv")
+                np.savetxt(csv_path, arr, delimiter=",")
+                exported.append(csv_path)
                 if progress_cb:
-                    progress_cb(f"Exported sectors -> {txt_path}")
-                break
-            except Exception:
-                pass
+                    progress_cb(f"Exported Vpica -> {csv_path}")
+        except Exception as exc:
+            if progress_cb:
+                progress_cb(f"Failed to export Vpica: {exc}")
+
+    # Export sector / IC position lists
+    ics = Dsect.get("ics") if isinstance(Dsect, dict) else None
+    if ics is None and isinstance(data, dict):
+        ics = data.get("ics")
+    if ics is not None:
+        try:
+            txt_path = os.path.join(export_dir, "sectors.txt")
+            with open(txt_path, "w", encoding="utf-8") as f:
+                for i, u in enumerate(ics):
+                    items = getattr(u, "items", None) if u is not None else None
+                    if items is None and isinstance(u, dict) and "items" in u:
+                        items = u["items"]
+                    if items is not None:
+                        seq = [int(x) for x in (items if isinstance(items, (list, tuple)) else items.tolist())]  # type: ignore[union-attr]  # noqa: E501
+                    else:
+                        seq = list(u) if u is not None else []
+                    positions = ",".join(str(p) for p in seq)
+                    f.write(f"IC {i + 1}: {positions}\n")
+            exported.append(txt_path)
+            if progress_cb:
+                progress_cb(f"Exported ics -> {txt_path}")
+        except Exception:
+            pass
 
     return exported
