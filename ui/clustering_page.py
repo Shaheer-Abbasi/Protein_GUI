@@ -517,6 +517,7 @@ class ClusteringPage(QWidget):
         self.progress_bar.hide()
         self.status_label.setText(f"Clustering complete! ({elapsed:.1f}s)")
         self.results_tabs.show()
+        self.splitter.setSizes([260, 620])
 
     def on_clustering_error(self, error_msg):
         QMessageBox.critical(self, "Clustering Error", f"An error occurred:\n\n{error_msg}")

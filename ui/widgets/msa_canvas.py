@@ -15,6 +15,7 @@ from core.colorscheme_engine import (
     consensus_sequence,
 )
 from core.colorscheme_parser import ColorScheme
+from ui.theme import get_theme
 
 
 def _luminance(c: QColor) -> float:
@@ -51,9 +52,9 @@ class MSACanvas(QWidget):
         self._cell_w = 14.0
         self._cell_h = 18.0
         self._label_pad = 8.0
-        self._gap_bg = QColor(45, 45, 48)
-        self._plain_bg = QColor(52, 52, 58)
-        self._grid_pen = QPen(QColor(60, 60, 65))
+        self._gap_bg = QColor(230, 232, 235)
+        self._plain_bg = QColor(247, 248, 250)
+        self._grid_pen = QPen(QColor(213, 216, 220))
 
         self._font = QFont("Menlo", 11)
         if not QFont("Menlo").exactMatch():
@@ -195,13 +196,14 @@ class MSACanvas(QWidget):
         c0 = max(0, int((rect.left() - lw) / self._cell_w))
         c1 = min(cols, int((rect.right() - lw) / self._cell_w) + 1)
 
+        t = get_theme()
         # Label column background
-        painter.fillRect(0, rect.top(), int(lw), rect.height(), QColor(35, 35, 38))
+        painter.fillRect(0, rect.top(), int(lw), rect.height(), QColor(t.get("bg_secondary")))
 
         for ri in range(r0, r1):
             y = ri * self._cell_h
             lbl = self._display_labels[ri]
-            painter.setPen(QColor(200, 200, 205))
+            painter.setPen(QColor(t.get("text_secondary")))
             painter.drawText(
                 QPointF(self._label_pad, y + self._fm.ascent() + (self._cell_h - self._fm.height()) / 2),
                 lbl,

@@ -811,6 +811,7 @@ class AlignmentPage(QWidget):
         self.status_label.setText("Alignment complete!")
         self._results_panel.show()
         self.results_tabs.show()
+        self.splitter.setSizes([220, 620])
 
         self._refresh_pysca_status()
 

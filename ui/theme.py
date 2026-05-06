@@ -89,14 +89,14 @@ def _make_arrow_icon(direction: str, color: str, size: int = 10) -> str:
 
 def _platform_ui_font():
     if sys.platform == "darwin":
-        return '"SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif'
-    return '"Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        return '"Helvetica Neue", Helvetica, Arial'
+    return '"Segoe UI", Roboto, "Helvetica Neue", Arial'
 
 
 def _platform_mono_font():
     if sys.platform == "darwin":
-        return '"JetBrains Mono", Menlo, "SF Mono", Monaco, monospace'
-    return '"JetBrains Mono", Consolas, "Courier New", monospace'
+        return 'Menlo, "SF Mono", Monaco'
+    return 'Consolas, "Courier New"'
 
 
 LIGHT = {
@@ -239,8 +239,12 @@ class ThemeManager(QObject):
         }}
 
         QWidget {{
-            background-color: transparent;
+            background-color: {p['bg_primary']};
             color: {p['text_primary']};
+        }}
+
+        QWidget[class="card"], QGroupBox, QFrame[class="card"] {{
+            background-color: {p['bg_card']};
         }}
 
         /* ── Tab Widget ─────────────────────────────────── */
@@ -259,6 +263,10 @@ class ThemeManager(QObject):
 
         QTabWidget::tab-bar {{
             background-color: {p['bg_secondary']};
+        }}
+
+        QStackedWidget, QScrollArea, QScrollArea > QWidget > QWidget {{
+            background-color: {p['bg_primary']};
         }}
 
         QTabBar::tab {{
