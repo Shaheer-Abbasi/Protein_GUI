@@ -168,6 +168,7 @@ PAGE_ACCENTS = {
     "mmseqs":      "#9B59B6",
     "clustering":  "#E67E22",
     "alignment":   "#1ABC9C",
+    "phylo":       "#16A085",
     "motif":       "#E91E63",
     "tools":       "#607D8B",
     "database":    "#00897B",

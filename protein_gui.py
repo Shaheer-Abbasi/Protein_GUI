@@ -18,10 +18,11 @@ from ui.alignment_page import AlignmentPage
 from ui.motif_search_page import MotifSearchPage
 from ui.database_downloads_page import DatabaseDownloadsPage
 from ui.tools_page import ToolsPage
+from ui.phylo_page import PhyloPage
 
 TAB_ICONS = [
     "home", "search", "search",
-    "grid", "bar-chart-2", "filter", "tool", "database",
+    "grid", "bar-chart-2", "layers", "filter", "tool", "database",
 ]
 
 
@@ -54,6 +55,7 @@ class ProteinGUI(QMainWindow):
         self.blastn_page = BLASTNPage()
         self.clustering_page = ClusteringPage()
         self.alignment_page = AlignmentPage()
+        self.phylo_page = PhyloPage()
         self.motif_search_page = MotifSearchPage()
         self.tools_page = ToolsPage()
         self.database_downloads_page = DatabaseDownloadsPage()
@@ -64,6 +66,7 @@ class ProteinGUI(QMainWindow):
         self.tabs.addTab(self.blastn_page,              feather_icon("search", 18),         "BLASTN")
         self.tabs.addTab(self.clustering_page,          feather_icon("grid", 18),           "Clustering")
         self.tabs.addTab(self.alignment_page,           feather_icon("bar-chart-2", 18),    "Alignment")
+        self.tabs.addTab(self.phylo_page,               feather_icon("layers", 18),          "Phylogenetic Analysis")
         self.tabs.addTab(self.motif_search_page,        feather_icon("filter", 18),         "Motif Search")
         self.tabs.addTab(self.tools_page,               feather_icon("tool", 18),           "Tools")
         self.tabs.addTab(self.database_downloads_page,  feather_icon("database", 18),       "Databases")
@@ -94,6 +97,10 @@ class ProteinGUI(QMainWindow):
         self.protein_search_page.navigate_to_clustering.connect(self._show_clustering_with_fasta)
         self.protein_search_page.navigate_to_alignment.connect(self._show_alignment_with_fasta)
 
+        self.phylo_page.navigate_to_alignment.connect(self._show_alignment_with_fasta)
+        self.phylo_page.navigate_to_clustering.connect(self._show_clustering_with_fasta)
+        self.alignment_page.navigate_to_phylo.connect(self._show_phylo_with_fasta_text)
+
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
     def _navigate_from_home(self, service: str):
@@ -102,6 +109,7 @@ class ProteinGUI(QMainWindow):
             "blastn":             self.blastn_page,
             "clustering":         self.clustering_page,
             "alignment":          self.alignment_page,
+            "phylo":              self.phylo_page,
             "motif_search":       self.motif_search_page,
             "tools":              self.tools_page,
             "database_downloads": self.database_downloads_page,
@@ -117,9 +125,10 @@ class ProteinGUI(QMainWindow):
             2: "Sen Lab - BLASTN Search",
             3: "Sen Lab - MMseqs2 Clustering",
             4: "Sen Lab - Sequence Alignment",
-            5: "Sen Lab - Motif Search",
-            6: "Sen Lab - Tools",
-            7: "Sen Lab - Database Downloads",
+            5: "Sen Lab - Phylogenetic Analysis",
+            6: "Sen Lab - Motif Search",
+            7: "Sen Lab - Tools",
+            8: "Sen Lab - Database Downloads",
         }
         self.setWindowTitle(titles.get(index, "Sen Lab"))
 
@@ -130,6 +139,10 @@ class ProteinGUI(QMainWindow):
     def _show_alignment_with_fasta(self, fasta_path: str):
         self.alignment_page.load_sequences_from_search(fasta_path)
         self.tabs.setCurrentWidget(self.alignment_page)
+
+    def _show_phylo_with_fasta_text(self, fasta_text: str):
+        self.phylo_page.load_fasta_text(fasta_text, show_error=False)
+        self.tabs.setCurrentWidget(self.phylo_page)
 
     def _on_theme_changed(self, theme_name: str):
         self._update_theme_button()
@@ -190,6 +203,7 @@ class ProteinGUI(QMainWindow):
             self.alignment_page._pysca_install_worker,
             self.alignment_page._pysca_run_worker,
             self.alignment_page._pysca_export_worker,
+            getattr(self.phylo_page, "phylo_worker", None),
         ]
         for w in workers:
             if w is None or not w.isRunning():

@@ -39,6 +39,7 @@ class AlignmentPage(QWidget):
     """Sequence alignment with Clustal Omega, MAFFT, MUSCLE, or FAMSA."""
 
     back_requested = pyqtSignal()
+    navigate_to_phylo = pyqtSignal(str)  # aligned FASTA text
 
     def __init__(self):
         super().__init__()
@@ -487,6 +488,13 @@ class AlignmentPage(QWidget):
         el.addWidget(export_clustal_btn)
 
         el.addStretch()
+        phylo_btn = QPushButton("Send to Phylogenetic Analysis")
+        phylo_btn.setProperty("class", "secondary")
+        set_button_icon(phylo_btn, "layers", 14)
+        phylo_btn.clicked.connect(self._send_alignment_to_phylo)
+        el.addWidget(phylo_btn)
+
+        el.addStretch()
         self.results_tabs.addTab(export_tab, feather_icon("download", 16), "Export")
 
         splitter.addWidget(self._results_panel)
@@ -835,7 +843,23 @@ class AlignmentPage(QWidget):
         self.progress_bar.hide()
         self.status_label.setText("Error occurred")
 
-    # ── Export ───────────────────────────────────────────────────
+    def _send_alignment_to_phylo(self):
+        if not self.aligned_content:
+            QMessageBox.warning(
+                self, "No Alignment",
+                "Run an alignment first, then send it to Phylogenetic Analysis.",
+            )
+            return
+        fmt = self._alignment_output_format or self.format_combo.currentData()
+        if fmt != "fasta":
+            QMessageBox.information(
+                self, "Phylogenetic Analysis",
+                "This action requires aligned FASTA output.\n\n"
+                "Re-run the alignment with output format “FASTA (aligned)”.",
+            )
+            return
+        self.navigate_to_phylo.emit(self.aligned_content)
+
     def _export_alignment(self, format_type):
         if not self.aligned_content:
             QMessageBox.warning(self, "No Alignment", "No alignment available to export.")
