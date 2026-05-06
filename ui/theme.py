@@ -244,12 +244,20 @@ class ThemeManager(QObject):
         }}
 
         /* ── Tab Widget ─────────────────────────────────── */
+        QTabWidget {{
+            background-color: {p['bg_primary']};
+        }}
+
         QTabWidget::pane {{
             border: none;
             background-color: {p['bg_primary']};
         }}
 
         QTabBar {{
+            background-color: {p['bg_secondary']};
+        }}
+
+        QTabWidget::tab-bar {{
             background-color: {p['bg_secondary']};
         }}
 

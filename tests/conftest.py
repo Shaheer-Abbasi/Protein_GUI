@@ -5,8 +5,30 @@ import json
 import tempfile
 import pytest
 
+# Run Qt tests headlessly unless the caller explicitly chooses another backend.
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("XDG_CACHE_HOME", os.path.join(tempfile.gettempdir(), "protein_gui_test_cache"))
+os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "protein_gui_test_mpl"))
+
 # Ensure the project root is on the path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+
+@pytest.fixture(scope="session")
+def qt_app():
+    """Provide a QApplication for PyQt UI tests without requiring pytest-qt."""
+    from PyQt5.QtWidgets import QApplication
+    from PyQt5.QtCore import QSettings
+
+    settings_dir = os.path.join(tempfile.gettempdir(), "protein_gui_test_qsettings")
+    os.makedirs(settings_dir, exist_ok=True)
+    QSettings.setPath(QSettings.IniFormat, QSettings.UserScope, settings_dir)
+    QSettings.setPath(QSettings.NativeFormat, QSettings.UserScope, settings_dir)
+
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication(["pytest"])
+    return app
 
 
 @pytest.fixture

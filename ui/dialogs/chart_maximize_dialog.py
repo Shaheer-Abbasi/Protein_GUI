@@ -238,8 +238,8 @@ class ChartMaximizeDialog(QDialog):
     def _update_chart_display(self):
         """Update the chart display with current zoom level"""
         scaled_pixmap = self.original_pixmap.scaled(
-            self.original_pixmap.width() * self.current_zoom,
-            self.original_pixmap.height() * self.current_zoom,
+            int(self.original_pixmap.width() * self.current_zoom),
+            int(self.original_pixmap.height() * self.current_zoom),
             Qt.KeepAspectRatio,
             Qt.SmoothTransformation
         )
@@ -287,4 +287,3 @@ class ChartMaximizeDialog(QDialog):
         
         self.current_zoom = fit_zoom
         self._update_chart_display()
-
