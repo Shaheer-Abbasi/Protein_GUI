@@ -117,21 +117,9 @@ class NucleotideSearchDialog(QDialog):
         self.search_input.returnPressed.connect(self._perform_search)
         
         self.search_button = QPushButton("Search")
+        self.search_button.setProperty("class", "success")
         self.search_button.clicked.connect(self._perform_search)
         self.search_button.setDefault(True)
-        self.search_button.setStyleSheet("""
-            QPushButton {
-                background-color: #1e8449;
-                color: white;
-                padding: 8px 16px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #196f3d;
-            }
-        """)
         
         input_layout.addWidget(self.search_input)
         input_layout.addWidget(self.search_button)
@@ -147,7 +135,7 @@ class NucleotideSearchDialog(QDialog):
         self.examples_label = QLabel(
             '<i>Examples: "BRCA1", "insulin Homo sapiens", "cytochrome oxidase"</i>'
         )
-        self.examples_label.setStyleSheet("color: #666;")
+        self.examples_label.setProperty("class", "muted")
         search_layout.addWidget(self.examples_label)
         
         search_group.setLayout(search_layout)
@@ -165,29 +153,14 @@ class NucleotideSearchDialog(QDialog):
         # Result count and fetch button
         result_action_layout = QHBoxLayout()
         self.result_count_label = QLabel("No search performed yet")
-        self.result_count_label.setStyleSheet("color: #666; font-style: italic;")
+        self.result_count_label.setProperty("class", "muted")
         result_action_layout.addWidget(self.result_count_label)
         result_action_layout.addStretch()
         
         self.fetch_button = QPushButton("Fetch Sequence")
+        self.fetch_button.setProperty("class", "secondary")
         self.fetch_button.setEnabled(False)
         self.fetch_button.clicked.connect(self._fetch_selected_sequence)
-        self.fetch_button.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                padding: 6px 12px;
-                font-weight: bold;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
         result_action_layout.addWidget(self.fetch_button)
         
         results_layout.addLayout(result_action_layout)
@@ -215,27 +188,12 @@ class NucleotideSearchDialog(QDialog):
         button_layout.addStretch()
         
         self.load_button = QPushButton("Load Sequence")
+        self.load_button.setProperty("class", "success")
         self.load_button.clicked.connect(self._load_sequence)
         self.load_button.setEnabled(False)
-        self.load_button.setStyleSheet("""
-            QPushButton {
-                background-color: #1e8449;
-                color: white;
-                padding: 10px 20px;
-                font-weight: bold;
-                font-size: 13px;
-                border: none;
-                border-radius: 4px;
-            }
-            QPushButton:hover {
-                background-color: #196f3d;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
         
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setProperty("class", "secondary")
         self.cancel_button.clicked.connect(self.reject)
         
         button_layout.addWidget(self.load_button)
@@ -501,4 +459,3 @@ class NucleotideSearchDialog(QDialog):
         
         self.sequence_selected.emit(sequence, metadata)
         self.accept()
-

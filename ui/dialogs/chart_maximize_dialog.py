@@ -5,6 +5,8 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLab
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QPixmap, QFont
 
+from ui.theme import get_theme
+
 
 class ChartMaximizeDialog(QDialog):
     """
@@ -39,19 +41,7 @@ class ChartMaximizeDialog(QDialog):
         title_label.setFont(title_font)
         
         close_button = QPushButton("✕ Close")
-        close_button.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 5px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #c0392b;
-            }
-        """)
+        close_button.setProperty("class", "danger")
         close_button.clicked.connect(self.accept)
         
         header_layout.addWidget(title_label)
@@ -62,92 +52,29 @@ class ChartMaximizeDialog(QDialog):
         zoom_layout = QHBoxLayout()
         
         zoom_label = QLabel("Zoom:")
-        zoom_label.setStyleSheet("font-weight: bold; color: #34495e;")
+        zoom_label.setProperty("class", "heading")
         
         self.zoom_out_button = QPushButton("−")
         self.zoom_out_button.setFixedSize(35, 35)
-        self.zoom_out_button.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                font-size: 20px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
+        self.zoom_out_button.setProperty("class", "secondary")
         self.zoom_out_button.clicked.connect(self._zoom_out)
         
         self.zoom_level_label = QLabel("100%")
         self.zoom_level_label.setMinimumWidth(60)
         self.zoom_level_label.setAlignment(Qt.AlignCenter)
-        self.zoom_level_label.setStyleSheet("""
-            QLabel {
-                background-color: #ecf0f1;
-                border: 1px solid #bdc3c7;
-                border-radius: 3px;
-                padding: 5px;
-                font-weight: bold;
-                color: #2c3e50;
-            }
-        """)
+        self.zoom_level_label.setProperty("class", "valueBadge")
         
         self.zoom_in_button = QPushButton("+")
         self.zoom_in_button.setFixedSize(35, 35)
-        self.zoom_in_button.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                font-size: 20px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
+        self.zoom_in_button.setProperty("class", "secondary")
         self.zoom_in_button.clicked.connect(self._zoom_in)
         
         self.fit_button = QPushButton("Fit to Window")
-        self.fit_button.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 5px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
+        self.fit_button.setProperty("class", "secondary")
         self.fit_button.clicked.connect(self._fit_to_window)
         
         self.reset_button = QPushButton("100%")
-        self.reset_button.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                border-radius: 3px;
-                padding: 5px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
+        self.reset_button.setProperty("class", "secondary")
         self.reset_button.clicked.connect(self._reset_zoom)
         
         zoom_layout.addWidget(zoom_label)
@@ -169,44 +96,23 @@ class ChartMaximizeDialog(QDialog):
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidget(self.chart_label)
         self.scroll_area.setWidgetResizable(False)  # Important for zoom to work
-        self.scroll_area.setStyleSheet("""
-            QScrollArea {
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                background-color: white;
-            }
-        """)
+        t = get_theme()
+        self.scroll_area.setStyleSheet(
+            f"QScrollArea {{ border: 1px solid {t.get('border')}; border-radius: 6px; "
+            f"background-color: {t.get('bg_card')}; }}"
+        )
         
         # Install event filter for Ctrl+Scroll zoom
         self.scroll_area.viewport().installEventFilter(self)
         
         # Help text
         help_label = QLabel("💡 Tip: Use Ctrl+Scroll to zoom, or use the zoom buttons above")
-        help_label.setStyleSheet("""
-            QLabel {
-                color: #7f8c8d;
-                font-style: italic;
-                padding: 5px;
-            }
-        """)
+        help_label.setProperty("class", "muted")
         
         # Close button at bottom
         bottom_button_layout = QHBoxLayout()
         bottom_close_button = QPushButton("Close")
-        bottom_close_button.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 10px 30px;
-                font-weight: bold;
-                font-size: 14px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
+        bottom_close_button.setProperty("class", "secondary")
         bottom_close_button.clicked.connect(self.accept)
         
         bottom_button_layout.addStretch()

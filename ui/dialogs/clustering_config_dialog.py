@@ -9,6 +9,8 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 from typing import List, Dict, Any
 
+from ui.theme import get_theme
+
 
 class ClusteringConfigDialog(QDialog):
     """
@@ -58,8 +60,12 @@ class ClusteringConfigDialog(QDialog):
         if failed_count > 0:
             summary_text += f"<b>✗ Failed to retrieve:</b> {failed_count}"
         
+        t = get_theme()
         summary_label = QLabel(summary_text)
-        summary_label.setStyleSheet("padding: 10px; background-color: #ecf0f1; border-radius: 5px;")
+        summary_label.setStyleSheet(
+            f"padding: 10px; background-color: {t.get('bg_input')}; "
+            f"border: 1px solid {t.get('border')}; border-radius: 5px;"
+        )
         summary_layout.addWidget(summary_label)
         
         summary_group.setLayout(summary_layout)
@@ -100,7 +106,7 @@ class ClusteringConfigDialog(QDialog):
             "<i>Easy-cluster: Balanced speed and sensitivity<br>"
             "Linclust: Very fast for large datasets</i>"
         )
-        method_desc_label.setStyleSheet("color: #666; margin-top: 5px;")
+        method_desc_label.setProperty("class", "muted")
         method_layout.addWidget(method_desc_label)
         
         method_group.setLayout(method_layout)
@@ -173,13 +179,13 @@ class ClusteringConfigDialog(QDialog):
             )
             warning_label.setStyleSheet("""
                 QLabel {
-                    background-color: #fff3cd;
-                    color: #856404;
+                    background-color: %s;
+                    color: %s;
                     padding: 10px;
                     border-radius: 5px;
                     font-weight: bold;
                 }
-            """)
+            """ % (t.get('warning_bg'), t.get('text_primary')))
             warning_label.setWordWrap(True)
             layout.addWidget(warning_label)
         
@@ -188,13 +194,13 @@ class ClusteringConfigDialog(QDialog):
             continue_label = QLabel(f"Ready to cluster {success_count} sequences")
             continue_label.setStyleSheet("""
                 QLabel {
-                    background-color: #d4edda;
-                    color: #155724;
+                    background-color: %s;
+                    color: %s;
                     padding: 10px;
                     border-radius: 5px;
                     font-weight: bold;
                 }
-            """)
+            """ % (t.get('success_bg'), t.get('text_primary')))
             layout.addWidget(continue_label)
         else:
             error_label = QLabel(
@@ -202,13 +208,13 @@ class ClusteringConfigDialog(QDialog):
             )
             error_label.setStyleSheet("""
                 QLabel {
-                    background-color: #f8d7da;
-                    color: #721c24;
+                    background-color: %s;
+                    color: %s;
                     padding: 10px;
                     border-radius: 5px;
                     font-weight: bold;
                 }
-            """)
+            """ % (t.get('error_bg'), t.get('text_primary')))
             layout.addWidget(error_label)
         
         layout.addStretch()
@@ -218,25 +224,13 @@ class ClusteringConfigDialog(QDialog):
         button_layout.addStretch()
         
         cancel_button = QPushButton("Cancel")
+        cancel_button.setProperty("class", "secondary")
         cancel_button.clicked.connect(self.reject)
         
         self.start_button = QPushButton("Start Clustering →")
+        self.start_button.setProperty("class", "success")
         self.start_button.clicked.connect(self._on_start_clustering)
         self.start_button.setEnabled(success_count >= 2)
-        self.start_button.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
         
         button_layout.addWidget(cancel_button)
         button_layout.addWidget(self.start_button)
@@ -287,4 +281,3 @@ class ClusteringConfigDialog(QDialog):
     def get_successful_hits(self) -> List:
         """Get the successfully retrieved hits"""
         return self.successful_hits
-

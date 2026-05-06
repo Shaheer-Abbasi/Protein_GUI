@@ -11,6 +11,8 @@ from PyQt5.QtGui import QFont, QDoubleValidator
 
 from typing import List
 
+from ui.theme import get_theme
+
 
 class ClusterSelectionDialog(QDialog):
     """
@@ -152,9 +154,11 @@ class ClusterSelectionDialog(QDialog):
         self.remove_duplicates_checkbox.toggled.connect(self._update_selection_display)
         
         select_all_button = QPushButton("Select All")
+        select_all_button.setProperty("class", "secondary")
         select_all_button.clicked.connect(self._select_all)
         
         clear_all_button = QPushButton("Clear All")
+        clear_all_button.setProperty("class", "secondary")
         clear_all_button.clicked.connect(self._clear_all)
         
         controls_layout.addWidget(self.remove_duplicates_checkbox)
@@ -166,14 +170,7 @@ class ClusterSelectionDialog(QDialog):
         
         # Selection summary
         self.summary_label = QLabel()
-        self.summary_label.setStyleSheet("""
-            QLabel {
-                background-color: #ecf0f1;
-                padding: 10px;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-        """)
+        self.summary_label.setStyleSheet(self._summary_style("bg_input"))
         layout.addWidget(self.summary_label)
         
         # Buttons
@@ -181,24 +178,12 @@ class ClusterSelectionDialog(QDialog):
         button_layout.addStretch()
         
         cancel_button = QPushButton("Cancel")
+        cancel_button.setProperty("class", "secondary")
         cancel_button.clicked.connect(self.reject)
         
         self.continue_button = QPushButton("Continue →")
+        self.continue_button.setProperty("class", "success")
         self.continue_button.clicked.connect(self._on_continue)
-        self.continue_button.setStyleSheet("""
-            QPushButton {
-                background-color: #27ae60;
-                color: white;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #229954;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
         
         button_layout.addWidget(cancel_button)
         button_layout.addWidget(self.continue_button)
@@ -206,6 +191,16 @@ class ClusterSelectionDialog(QDialog):
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
+
+    def _summary_style(self, background_key):
+        t = get_theme()
+        return (
+            "QLabel { "
+            f"background-color: {t.get(background_key)}; "
+            f"color: {t.get('text_primary')}; "
+            "padding: 10px; border-radius: 5px; font-weight: bold; "
+            "}"
+        )
     
     def _populate_table(self):
         """Populate the results table with search hits"""
@@ -341,42 +336,18 @@ class ClusterSelectionDialog(QDialog):
         self.continue_button.setEnabled(selected_count >= 2)
         
         if selected_count < 2:
-            self.summary_label.setStyleSheet("""
-                QLabel {
-                    background-color: #f8d7da;
-                    color: #721c24;
-                    padding: 10px;
-                    border-radius: 5px;
-                    font-weight: bold;
-                }
-            """)
+            self.summary_label.setStyleSheet(self._summary_style("error_bg"))
             if selected_count == 0:
                 self.summary_label.setText("⚠️ No sequences selected. Select at least 2 sequences.")
             else:
                 self.summary_label.setText("⚠️ Only 1 sequence selected. Select at least 2 sequences.")
         elif selected_count > 100:
-            self.summary_label.setStyleSheet("""
-                QLabel {
-                    background-color: #fff3cd;
-                    color: #856404;
-                    padding: 10px;
-                    border-radius: 5px;
-                    font-weight: bold;
-                }
-            """)
+            self.summary_label.setStyleSheet(self._summary_style("warning_bg"))
             self.summary_label.setText(
                 f"⚠️ Selected: {selected_count} sequences{duplicate_text} (Large selection may be slow)"
             )
         else:
-            self.summary_label.setStyleSheet("""
-                QLabel {
-                    background-color: #d4edda;
-                    color: #155724;
-                    padding: 10px;
-                    border-radius: 5px;
-                    font-weight: bold;
-                }
-            """)
+            self.summary_label.setStyleSheet(self._summary_style("success_bg"))
     
     def _select_all(self):
         """Select all checkboxes"""
@@ -458,4 +429,3 @@ class ClusterSelectionDialog(QDialog):
     def get_selected_hits(self) -> List:
         """Get the selected hits"""
         return self.selected_hits
-

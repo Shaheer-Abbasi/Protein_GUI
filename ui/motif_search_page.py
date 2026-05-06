@@ -337,6 +337,7 @@ class MotifSearchPage(QWidget):
 
         # ── Bottom: results tabs ─────────────────────────────────
         self.results_tabs = QTabWidget()
+        self.results_tabs.setObjectName("resultsTabs")
         self.results_tabs.hide()
 
         # Tab 1: Plots
@@ -380,8 +381,8 @@ class MotifSearchPage(QWidget):
         el.addWidget(QLabel("Export the search results:"))
 
         export_csv_btn = QPushButton("Export as CSV")
-        export_csv_btn.setProperty("class", "success")
-        set_button_icon(export_csv_btn, "download", 14, "#FFFFFF")
+        export_csv_btn.setProperty("class", "secondary")
+        set_button_icon(export_csv_btn, "download", 14)
         export_csv_btn.clicked.connect(self.export_csv)
         el.addWidget(export_csv_btn)
 

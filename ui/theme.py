@@ -290,6 +290,20 @@ class ThemeManager(QObject):
             background-color: {p['bg_hover']};
         }}
 
+        QTabWidget#resultsTabs::pane {{
+            border-top: 1px solid {p['border_light']};
+        }}
+
+        QTabWidget#resultsTabs QTabBar::tab {{
+            padding: 7px 14px;
+            font-size: 11px;
+            border-bottom: 2px solid transparent;
+        }}
+
+        QTabWidget#resultsTabs QTabBar::tab:selected {{
+            border-bottom: 2px solid {p['accent']};
+        }}
+
         /* ── Group Box ──────────────────────────────────── */
         QGroupBox {{
             font-weight: normal;
@@ -495,16 +509,43 @@ class ThemeManager(QObject):
         }}
 
         /* ── Radio / Check ──────────────────────────────── */
-        QRadioButton, QCheckBox {{
+        /* Radios: pill-style card so they don't pick up sharp QWidget(bg_primary) rects
+           on top of QGroupBox (bg_card); radius matches QPushButton / QGroupBox. */
+        QRadioButton {{
             color: {p['text_primary']};
             spacing: 8px;
-            padding: 4px 2px;
             font-size: 13px;
+            background-color: {p['bg_secondary']};
+            /* 2px border in both states so checked/unchecked don't steal inner width */
+            border: 2px solid {p['border_light']};
+            border-radius: 8px;
+            padding: 8px 20px;
+            margin: 0 8px 6px 0;
+        }}
+
+        QRadioButton:hover {{
+            background-color: {p['bg_hover']};
+            border-color: {p['border']};
         }}
 
         QRadioButton:checked {{
             color: {p['accent']};
             font-weight: 600;
+            background-color: {p['bg_card']};
+            border: 2px solid {p['accent']};
+            padding: 8px 20px;
+        }}
+
+        QRadioButton:checked:hover {{
+            border-color: {p['accent_hover']};
+        }}
+
+        QCheckBox {{
+            color: {p['text_primary']};
+            spacing: 8px;
+            padding: 4px 2px;
+            font-size: 13px;
+            background-color: transparent;
         }}
 
         QCheckBox:checked {{
@@ -675,6 +716,15 @@ class ThemeManager(QObject):
             font-weight: 600;
             color: {p['text_secondary']};
             padding: 4px 0;
+        }}
+
+        QLabel[class="valueBadge"] {{
+            background-color: {p['bg_input']};
+            border: 1px solid {p['border']};
+            border-radius: 5px;
+            color: {p['text_primary']};
+            font-weight: 600;
+            padding: 5px 10px;
         }}
 
         QLabel[class="title"] {{

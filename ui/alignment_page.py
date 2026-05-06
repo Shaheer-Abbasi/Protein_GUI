@@ -278,8 +278,8 @@ class AlignmentPage(QWidget):
 
         viewer_bar = QHBoxLayout()
         self.open_viewer_btn = QPushButton("Open Alignment Viewer")
-        self.open_viewer_btn.setProperty("class", "success")
-        set_button_icon(self.open_viewer_btn, "eye", 16, "#FFFFFF")
+        self.open_viewer_btn.setProperty("class", "secondary")
+        set_button_icon(self.open_viewer_btn, "eye", 16)
         self.open_viewer_btn.setToolTip(
             "Open the interactive MSA viewer in a separate window (XML color schemes, zoom, export)."
         )
@@ -292,6 +292,7 @@ class AlignmentPage(QWidget):
         rp_layout.addLayout(viewer_bar)
 
         self.results_tabs = QTabWidget()
+        self.results_tabs.setObjectName("resultsTabs")
         self.results_tabs.hide()
         rp_layout.addWidget(self.results_tabs, 1)
 
@@ -474,14 +475,14 @@ class AlignmentPage(QWidget):
         el.addWidget(QLabel("Export the alignment in various formats:"))
 
         export_fasta_btn = QPushButton("Export as FASTA")
-        export_fasta_btn.setProperty("class", "success")
-        set_button_icon(export_fasta_btn, "download", 14, "#FFFFFF")
+        export_fasta_btn.setProperty("class", "secondary")
+        set_button_icon(export_fasta_btn, "download", 14)
         export_fasta_btn.clicked.connect(lambda: self._export_alignment('fasta'))
         el.addWidget(export_fasta_btn)
 
         export_clustal_btn = QPushButton("Export as Clustal")
-        export_clustal_btn.setProperty("class", "success")
-        set_button_icon(export_clustal_btn, "download", 14, "#FFFFFF")
+        export_clustal_btn.setProperty("class", "secondary")
+        set_button_icon(export_clustal_btn, "download", 14)
         export_clustal_btn.clicked.connect(lambda: self._export_alignment('clustal'))
         el.addWidget(export_clustal_btn)
 
