@@ -69,8 +69,64 @@ TOOLS: Dict[str, ToolSpec] = {
         package_name="clustalo",
         channels=("bioconda",),
         executables=("clustalo",),
-        feature_labels=("alignment",),
+        feature_labels=("alignment", "alignment_clustalo"),
         version_args=("--version",),
+    ),
+    "mafft": ToolSpec(
+        id="mafft",
+        display_name="MAFFT",
+        package_name="mafft",
+        channels=("bioconda",),
+        executables=("mafft",),
+        feature_labels=("alignment", "alignment_mafft"),
+        version_args=("--version",),
+    ),
+    "muscle": ToolSpec(
+        id="muscle",
+        display_name="MUSCLE",
+        package_name="muscle",
+        channels=("bioconda",),
+        executables=("muscle",),
+        feature_labels=("alignment", "alignment_muscle"),
+        version_args=("-version",),
+    ),
+    "famsa": ToolSpec(
+        id="famsa",
+        display_name="FAMSA",
+        package_name="famsa",
+        channels=("bioconda",),
+        executables=("famsa",),
+        feature_labels=("alignment", "alignment_famsa"),
+        version_args=("--version",),
+    ),
+    "diamond": ToolSpec(
+        id="diamond",
+        display_name="DIAMOND",
+        package_name="diamond",
+        channels=("bioconda",),
+        executables=("diamond",),
+        feature_labels=("protein_diamond",),
+        version_args=("version",),
+    ),
+    "famsa_gpu": ToolSpec(
+        id="famsa_gpu",
+        display_name="FAMSA (GPU)",
+        package_name="famsa",
+        channels=("bioconda",),
+        executables=("famsa-gpu", "famsa"),
+        feature_labels=("alignment", "alignment_famsa_gpu"),
+        version_args=("--version",),
+        managed_platforms=(),
+    ),
+    "twilight": ToolSpec(
+        id="twilight",
+        display_name="TWILIGHT",
+        package_name="twilight",
+        channels=(),
+        executables=("twilight",),
+        feature_labels=("alignment", "alignment_twilight"),
+        version_args=("--version",),
+        managed_platforms=(),
     ),
 }
 
@@ -80,10 +136,28 @@ FEATURE_TOOLS: Dict[str, Tuple[str, ...]] = {
     "protein_mmseqs": ("mmseqs", "blastdbcmd"),
     "protein_mmseqs_existing_db": ("mmseqs",),
     "blastn": ("blastn",),
+    # Alignment: one tool per feature id so installs/checks are per selected aligner.
     "alignment": ("clustalo",),
+    "alignment_clustalo": ("clustalo",),
+    "alignment_mafft": ("mafft",),
+    "alignment_muscle": ("muscle",),
+    "alignment_famsa": ("famsa",),
+    "alignment_famsa_gpu": ("famsa_gpu",),
+    "alignment_twilight": ("twilight",),
+    "protein_diamond": ("diamond",),
     "clustering": ("mmseqs",),
     "database_conversion": ("blastdbcmd", "mmseqs"),
 }
+
+
+ALIGNMENT_TOOL_IDS: Tuple[str, ...] = ("clustalo", "mafft", "muscle", "famsa", "famsa_gpu", "twilight")
+
+
+def alignment_feature_id_for_tool(tool_id: str) -> str:
+    """Feature key for ToolRuntime.get_missing_tools_for_feature on the alignment tab."""
+    if tool_id not in ALIGNMENT_TOOL_IDS:
+        raise KeyError(f"Not an alignment tool id: {tool_id}")
+    return f"alignment_{tool_id}"
 
 
 def get_tool_spec(tool_id: str) -> ToolSpec:
@@ -129,6 +203,12 @@ def get_windows_backend_policy() -> Dict[str, str]:
         "blastdbcmd": "wsl",
         "mmseqs": "wsl",
         "clustalo": "wsl",
+        "mafft": "wsl",
+        "muscle": "wsl",
+        "famsa": "wsl",
+        "diamond": "wsl",
+        "famsa_gpu": "wsl",
+        "twilight": "wsl",
     }
 
 

@@ -34,13 +34,13 @@ class DatabaseDownloadWorker(QThread):
     Signals:
         progress(int, int, str): (bytes_downloaded, total_bytes, status_message)
         log(str): Log message for display
-        finished(str): Emitted on success with the final database path
+        download_finished(str): Emitted on success with the final database path
         error(str): Emitted on error with error message
     """
-    
+
     progress = pyqtSignal(int, int, str)  # bytes_downloaded, total_bytes, status
     log = pyqtSignal(str)
-    finished = pyqtSignal(str)  # final_path
+    download_finished = pyqtSignal(str)  # final_path (not "finished" — preserves QThread.finished)
     error = pyqtSignal(str)
     
     # Chunk size for downloads (1 MB)
@@ -149,7 +149,7 @@ class DatabaseDownloadWorker(QThread):
         
         self.log.emit(f"✓ Download complete!")
         self.log.emit(f"Database installed to: {final_path}")
-        self.finished.emit(final_path)
+        self.download_finished.emit(final_path)
     
     def _download_file(self, url: str, dest_path: str):
         """Download a file with progress reporting"""

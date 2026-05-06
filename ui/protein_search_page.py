@@ -17,9 +17,13 @@ from ui.widgets.results_panel import SearchResultsPanel
 from core.db_definitions import NCBI_DATABASES
 from core.blast_worker import BLASTWorker
 from core.mmseqs_runner import MMseqsWorker
+from core.diamond_worker import DiamondWorker
+from core.mmseqs_gpu_search_worker import MMseqsGPUSearchWorker
+from core.array_backend import cuda_available
 from core.config_manager import get_config
 from core.db_conversion_manager import DatabaseConversionManager
 from core.db_conversion_worker import DatabaseConversionWorker
+from core.installed_databases import get_installed_databases_tracker
 from core.wsl_utils import (
     is_wsl_available, check_mmseqs_installation,
     check_blastdbcmd_installation, get_platform_tool_install_hint,
@@ -58,9 +62,10 @@ class ProteinSearchPage(QWidget):
         # MMseqs2-specific state
         self.conversion_manager = DatabaseConversionManager()
         self.conversion_dialogs = {}
-        self.blast_db_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "blast_databases")
+        self._project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.blast_db_dir = os.path.join(self._project_root, "blast_databases")
         self.installed_databases = set()
+        self.tracker_db_paths = {}  # ncbi_name -> absolute path prefix (e.g. .../swissprot)
         self.custom_blast_db_path = None
         self.tool_install_worker = None
         self._pending_tool_action = None
@@ -97,12 +102,26 @@ class ProteinSearchPage(QWidget):
         self.tool_group = QButtonGroup()
         self.blast_radio = QRadioButton("BLASTP")
         self.mmseqs_radio = QRadioButton("MMseqs2")
+        self.diamond_radio = QRadioButton("DIAMOND")
+        self.mmseqs_gpu_radio = QRadioButton("MMseqs2 GPU")
         self.blast_radio.setChecked(True)
         self.tool_group.addButton(self.blast_radio, 0)
         self.tool_group.addButton(self.mmseqs_radio, 1)
+        self.tool_group.addButton(self.diamond_radio, 2)
+        self.tool_group.addButton(self.mmseqs_gpu_radio, 3)
         self.blast_radio.toggled.connect(self._on_tool_changed)
+        self.diamond_radio.toggled.connect(self._on_tool_changed)
+        self.mmseqs_gpu_radio.toggled.connect(self._on_tool_changed)
         tg.addWidget(self.blast_radio)
         tg.addWidget(self.mmseqs_radio)
+        tg.addWidget(self.diamond_radio)
+        tg.addWidget(self.mmseqs_gpu_radio)
+
+        self.gpu_checkbox = QCheckBox("GPU Accelerated")
+        self.gpu_checkbox.setChecked(True)
+        self.gpu_checkbox.setVisible(False)
+        tg.addWidget(self.gpu_checkbox)
+
         tg.addStretch()
         tool_group.setLayout(tg)
         form.addWidget(tool_group)
@@ -345,6 +364,13 @@ class ProteinSearchPage(QWidget):
         self.mmseqs_db_combo.setMinimumWidth(300)
         self.mmseqs_db_combo.currentTextChanged.connect(self._on_mmseqs_db_selection_changed)
         dd_row.addWidget(self.mmseqs_db_combo)
+
+        self.refresh_db_btn = QPushButton("Refresh")
+        self.refresh_db_btn.setProperty("class", "secondary")
+        set_button_icon(self.refresh_db_btn, "refresh-cw", 14)
+        self.refresh_db_btn.setToolTip("Re-scan blast_databases folder for newly installed databases")
+        self.refresh_db_btn.clicked.connect(self._refresh_databases)
+        dd_row.addWidget(self.refresh_db_btn)
         dd_row.addStretch()
 
         self.mmseqs_db_status_label = QLabel()
@@ -441,13 +467,23 @@ class ProteinSearchPage(QWidget):
     def _is_blast(self):
         return self.blast_radio.isChecked()
 
+    def _selected_tool_id(self) -> int:
+        return self.tool_group.checkedId()
+
     def _on_tool_changed(self):
-        blast = self._is_blast()
-        self.blast_db_group.setVisible(blast)
-        self.blast_adv_group.setVisible(blast)
-        self.mmseqs_db_group.setVisible(not blast)
-        label = "Run BLASTP Search" if blast else "Run MMseqs2 Search"
-        self.process_button.setText(label)
+        tid = self._selected_tool_id()
+        self.blast_db_group.setVisible(tid == 0)
+        self.blast_adv_group.setVisible(tid == 0)
+        self.mmseqs_db_group.setVisible(tid in (1, 2, 3))
+        self.gpu_checkbox.setVisible(tid == 3 and cuda_available())
+
+        labels = {
+            0: "Run BLASTP Search",
+            1: "Run MMseqs2 Search",
+            2: "Run DIAMOND Search",
+            3: "Run MMseqs2 GPU Search",
+        }
+        self.process_button.setText(labels.get(tid, "Run Search"))
 
     # ── Input method switching ───────────────────────────────────
 
@@ -598,19 +634,62 @@ class ProteinSearchPage(QWidget):
 
     def scan_installed_databases(self):
         self.installed_databases.clear()
-        if not os.path.exists(self.blast_db_dir):
-            return
+        self.tracker_db_paths.clear()
+
+        # 1) Legacy scan: blast_databases/<name>/<name>.phr
+        if os.path.exists(self.blast_db_dir):
+            try:
+                for item in os.listdir(self.blast_db_dir):
+                    folder = os.path.join(self.blast_db_dir, item)
+                    if os.path.isdir(folder):
+                        if (os.path.exists(os.path.join(folder, item + ".phr")) or
+                                os.path.exists(os.path.join(folder, item + ".00.phr"))):
+                            self.installed_databases.add(item)
+                            self.tracker_db_paths[item] = os.path.join(folder, item)
+            except Exception:
+                pass
+
+        # 2) Tracker-based scan: databases downloaded via the Downloads page
         try:
-            for item in os.listdir(self.blast_db_dir):
-                folder = os.path.join(self.blast_db_dir, item)
-                if os.path.isdir(folder):
-                    if (os.path.exists(os.path.join(folder, item + ".phr")) or
-                            os.path.exists(os.path.join(folder, item + ".00.phr"))):
-                        self.installed_databases.add(item)
-            if hasattr(self, "mmseqs_db_combo"):
-                self._populate_mmseqs_db_dropdown()
+            tracker = get_installed_databases_tracker()
+            for db in tracker.get_blast_databases():
+                install_dir = db.install_path
+                if not os.path.isdir(install_dir):
+                    continue
+                for fname in os.listdir(install_dir):
+                    if fname.endswith(".phr") or fname.endswith(".00.phr"):
+                        ncbi_name = fname.rsplit(".", 1)[0]
+                        if ncbi_name.endswith(".00"):
+                            ncbi_name = ncbi_name[:-3]
+                        self.installed_databases.add(ncbi_name)
+                        self.tracker_db_paths[ncbi_name] = os.path.join(install_dir, ncbi_name)
+                        break
         except Exception:
             pass
+
+        if hasattr(self, "mmseqs_db_combo"):
+            self._populate_mmseqs_db_dropdown()
+
+    def _refresh_databases(self):
+        prev_db = self._get_mmseqs_selected_db_name()
+        self.scan_installed_databases()
+        if prev_db and hasattr(self, "mmseqs_db_combo"):
+            for i in range(self.mmseqs_db_combo.count()):
+                if prev_db in self.mmseqs_db_combo.itemText(i):
+                    self.mmseqs_db_combo.setCurrentIndex(i)
+                    break
+        self.status_label.setText("Database list refreshed.")
+
+    def _resolve_blast_db_path(self, db_name: str) -> str:
+        """Resolve the path prefix for a BLAST database by NCBI name.
+
+        Checks tracker_db_paths (populated from both legacy dir and the
+        InstalledDatabasesTracker) first, then falls back to the legacy
+        blast_databases/<name>/<name> convention.
+        """
+        if db_name in self.tracker_db_paths:
+            return self.tracker_db_paths[db_name]
+        return os.path.join(self.blast_db_dir, db_name, db_name)
 
     def _populate_mmseqs_db_dropdown(self):
         self.mmseqs_db_combo.clear()
@@ -734,7 +813,8 @@ class ProteinSearchPage(QWidget):
                 lambda current, total, status: self.status_label.setText(status)
             )
             self.tool_install_worker.error.connect(self._on_tool_install_error)
-            self.tool_install_worker.finished.connect(self._on_tool_install_finished)
+            self.tool_install_worker.install_finished.connect(self._on_tool_install_finished)
+            self.tool_install_worker.finished.connect(self._on_tool_install_thread_finished)
             self.tool_install_worker.start()
             return False
 
@@ -748,8 +828,13 @@ class ProteinSearchPage(QWidget):
         )
         return False
 
-    def _on_tool_install_finished(self, _result):
+    def _on_tool_install_thread_finished(self):
+        worker = self.sender()
+        if worker is not self.tool_install_worker:
+            return
         self.tool_install_worker = None
+
+    def _on_tool_install_finished(self, _result):
         self.process_button.setEnabled(True)
         self._check_mmseqs_requirements()
         self.status_label.setText("Required tools installed.")
@@ -759,7 +844,6 @@ class ProteinSearchPage(QWidget):
             pending()
 
     def _on_tool_install_error(self, error_msg: str):
-        self.tool_install_worker = None
         self.process_button.setEnabled(True)
         self._pending_tool_action = None
         QMessageBox.critical(self, "Tool Install Error", error_msg)
@@ -786,7 +870,7 @@ class ProteinSearchPage(QWidget):
                 f"'{db_name}' is already being converted.")
             return
         if blast_db_path is None:
-            blast_db_path = os.path.join(self.blast_db_dir, db_name, db_name)
+            blast_db_path = self._resolve_blast_db_path(db_name)
         blast_dir = os.path.dirname(blast_db_path)
         if not os.path.exists(blast_dir):
             QMessageBox.critical(self, "Not Found", f"Directory not found: {blast_dir}")
@@ -863,10 +947,15 @@ class ProteinSearchPage(QWidget):
         return sequence
 
     def _run_search(self):
-        if self._is_blast():
+        tid = self._selected_tool_id()
+        if tid == 0:
             self._run_blast()
-        else:
+        elif tid == 1:
             self._run_mmseqs()
+        elif tid == 2:
+            self._run_diamond()
+        elif tid == 3:
+            self._run_mmseqs_gpu()
 
     def _run_blast(self):
         if not self._ensure_feature_tools("protein_blast", self._run_blast):
@@ -885,13 +974,17 @@ class ProteinSearchPage(QWidget):
         local_path = self.local_db_path.text().strip()
 
         if not use_remote and not local_path:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            default_dir = os.path.join(script_dir, "blast_databases")
-            if not os.path.exists(default_dir):
-                self.status_label.setText("Default database directory not found.")
+            resolved = self._resolve_blast_db_path(database)
+            resolved_dir = os.path.dirname(resolved)
+            if os.path.isdir(resolved_dir):
+                local_path = resolved_dir
+            elif os.path.isdir(self.blast_db_dir):
+                local_path = self.blast_db_dir
+            else:
+                self.status_label.setText(
+                    "Database directory not found. Install a database via the Downloads page.")
                 self.process_button.setEnabled(True)
                 return
-            local_path = ""
 
         self.search_start_time = time.time()
         self.blast_worker = BLASTWorker(sequence, database, use_remote, local_path,
@@ -911,7 +1004,8 @@ class ProteinSearchPage(QWidget):
             db_name = self._get_mmseqs_selected_db_name()
             if db_name not in self.installed_databases:
                 QMessageBox.warning(self, "Database Not Installed",
-                    f"'{db_name}' is not installed in:\n{self.blast_db_dir}")
+                    f"'{db_name}' is not installed.\n"
+                    "Use the Database Downloads page to install it, or click Refresh.")
                 return
             if self.conversion_manager.is_converting(db_name):
                 QMessageBox.information(self, "Conversion In Progress",
@@ -1001,6 +1095,179 @@ class ProteinSearchPage(QWidget):
         self.status_label.setText("Search complete!")
         self.process_button.setEnabled(True)
 
+    # ── DIAMOND ────────────────────────────────────────────────
+    def _run_diamond(self):
+        if not self._ensure_feature_tools("protein_diamond", self._run_diamond):
+            return
+        sequence = self._validate_sequence()
+        if not sequence:
+            return
+
+        if self.custom_mmseqs_radio.isChecked():
+            QMessageBox.warning(
+                self, "Incompatible Database",
+                "DIAMOND cannot use MMseqs2 databases directly.\n"
+                "Please select an NCBI database source instead.")
+            return
+
+        if self.ncbi_radio.isChecked():
+            db_name = self._get_mmseqs_selected_db_name()
+            if db_name not in self.installed_databases:
+                QMessageBox.warning(
+                    self, "Database Not Installed",
+                    f"'{db_name}' is not installed.\n"
+                    "Use the Database Downloads page to install it, or click Refresh.")
+                return
+            database_path = self._resolve_blast_db_path(db_name)
+        elif self.custom_ncbi_radio.isChecked():
+            bp = self.custom_ncbi_path.text().strip()
+            if not bp:
+                self.status_label.setText("Please select a BLAST database.")
+                return
+            database_path = bp
+        else:
+            return
+
+        self.process_button.setEnabled(False)
+        self.status_label.setText("Running DIAMOND blastp search...")
+        self.results_panel.clear()
+        self.search_start_time = time.time()
+        self._diamond_worker = DiamondWorker(sequence, database_path)
+        self._diamond_worker.finished.connect(self._on_diamond_finished)
+        self._diamond_worker.error.connect(self._on_search_error)
+        self._diamond_worker.start()
+
+    def _on_diamond_finished(self, results_html, results_data):
+        elapsed = time.time() - self.search_start_time if self.search_start_time else 0
+        self.current_results_html = results_html
+        self.current_results_data = results_data
+        self.current_query_info = {
+            "tool": "DIAMOND",
+            "query_name": self.current_sequence_metadata.get("id", "query"),
+            "query_length": str(len(self.input_text.toPlainText().strip())),
+            "database": self._get_mmseqs_current_db_name(),
+            "search_time": f"{elapsed:.1f}s",
+        }
+        self.results_panel.set_results(results_data, self.current_query_info)
+        self.status_label.setText("Search complete!")
+        self.process_button.setEnabled(True)
+
+    # ── MMseqs2 GPU search ────────────────────────────────────
+    def _run_mmseqs_gpu(self):
+        if not self._ensure_feature_tools("protein_mmseqs_existing_db", self._run_mmseqs_gpu):
+            return
+        sequence = self._validate_sequence()
+        if not sequence:
+            return
+        database_path = self._resolve_mmseqs_db_path()
+        if database_path is None:
+            return
+        use_gpu = self.gpu_checkbox.isChecked() and self.gpu_checkbox.isVisible()
+        sensitivity = self.sensitivity_combo.currentText().split(" - ")[0]
+        self.process_button.setEnabled(False)
+        gpu_label = " (GPU)" if use_gpu else ""
+        self.status_label.setText(f"Running MMseqs2{gpu_label} protein search...")
+        self.results_panel.clear()
+        self.search_start_time = time.time()
+        self._mmseqs_gpu_worker = MMseqsGPUSearchWorker(
+            sequence, database_path,
+            search_type="protein",
+            use_gpu=use_gpu,
+            sensitivity=sensitivity,
+        )
+        self._mmseqs_gpu_worker.finished.connect(self._on_mmseqs_gpu_finished)
+        self._mmseqs_gpu_worker.error.connect(self._on_search_error)
+        self._mmseqs_gpu_worker.start()
+
+    def _on_mmseqs_gpu_finished(self, results_html, results_data):
+        elapsed = time.time() - self.search_start_time if self.search_start_time else 0
+        self.current_results_html = results_html
+        self.current_results_data = results_data
+        gpu_label = " (GPU)" if self.gpu_checkbox.isChecked() else ""
+        self.current_query_info = {
+            "tool": f"MMseqs2{gpu_label}",
+            "query_name": self.current_sequence_metadata.get("id", "query"),
+            "query_length": str(len(self.input_text.toPlainText().strip())),
+            "database": self._get_mmseqs_current_db_name(),
+            "sensitivity": self.sensitivity_combo.currentText(),
+            "search_time": f"{elapsed:.1f}s",
+        }
+        self.results_panel.set_results(results_data, self.current_query_info)
+        self.status_label.setText("Search complete!")
+        self.process_button.setEnabled(True)
+
+    def _resolve_mmseqs_db_path(self):
+        """Resolve the database path from the MMseqs2 DB selector widgets.
+
+        Returns the path string, or None if the selection is invalid
+        (an error message is shown to the user in that case).
+        """
+        if self.ncbi_radio.isChecked():
+            db_name = self._get_mmseqs_selected_db_name()
+            if db_name not in self.installed_databases:
+                QMessageBox.warning(
+                    self, "Database Not Installed",
+                    f"'{db_name}' is not installed.\n"
+                    "Use the Database Downloads page to install it, or click Refresh.",
+                )
+                return None
+            if self.conversion_manager.is_converting(db_name):
+                QMessageBox.information(
+                    self, "Conversion In Progress",
+                    f"'{db_name}' is still being converted.",
+                )
+                return None
+            if not self.conversion_manager.is_converted(db_name):
+                reply = QMessageBox.question(
+                    self, "Database Not Converted",
+                    f"Convert '{db_name}' to MMseqs2 format?\nThis takes a few minutes.",
+                    QMessageBox.Yes | QMessageBox.No,
+                )
+                if reply == QMessageBox.Yes:
+                    self._start_database_conversion(db_name)
+                return None
+            status = self.conversion_manager.get_database_status(db_name)
+            path = status.get("converted_path")
+            if not path or not os.path.exists(path):
+                self.status_label.setText("Converted database not found. Try converting again.")
+                return None
+            return path
+
+        if self.custom_ncbi_radio.isChecked():
+            bp = self.custom_ncbi_path.text().strip()
+            if not bp:
+                self.status_label.setText("Please select a BLAST database.")
+                return None
+            if not os.path.exists(bp + ".phr"):
+                self.status_label.setText("BLAST database files not found.")
+                return None
+            db_name = os.path.basename(bp)
+            key = f"custom_{db_name}"
+            if not self.conversion_manager.is_converted(key):
+                reply = QMessageBox.question(
+                    self, "Convert Custom Database",
+                    f"Convert '{db_name}' to MMseqs2 format?",
+                    QMessageBox.Yes | QMessageBox.No,
+                )
+                if reply == QMessageBox.Yes:
+                    self._start_database_conversion(key, bp)
+                return None
+            status = self.conversion_manager.get_database_status(key)
+            path = status.get("converted_path")
+            if not path or not os.path.exists(path):
+                self.status_label.setText("Converted database not found.")
+                return None
+            return path
+
+        path = self.custom_mmseqs_path.text().strip()
+        if not path:
+            self.status_label.setText("Please select a database.")
+            return None
+        if not os.path.exists(path):
+            self.status_label.setText(f"Database not found: {path}")
+            return None
+        return path
+
     def _on_search_error(self, error_msg):
         self.results_panel.clear()
         self.status_label.setText(f"Error: {error_msg[:120]}")
@@ -1010,14 +1277,13 @@ class ProteinSearchPage(QWidget):
 
     def _get_database_path_for_fetch(self):
         """Resolve the database path for sequence fetching (cluster/align workflows)."""
-        if self._is_blast():
+        if self._selected_tool_id() == 0:
             if not self.remote_radio.isChecked():
                 if self.local_db_path.text().strip():
                     return os.path.join(self.local_db_path.text().strip(),
                         self.blast_db_combo.currentText().split(" - ")[0])
-                config = get_config()
                 db_name = self.blast_db_combo.currentText().split(" - ")[0]
-                return os.path.join(config.get_blast_db_dir(), db_name, db_name)
+                return self._resolve_blast_db_path(db_name)
         return self.current_database_path
 
     def _on_cluster_results(self):

@@ -38,13 +38,13 @@ class DatabaseInstallWorker(QThread):
     Signals:
         progress(int, int, str): (current_step, total_steps, status_message)
         log(str): Log message for display (supports ANSI-stripped output)
-        finished(str): Emitted on success with the final database path
+        install_finished(str): Emitted on success with the final database path
         error(str): Emitted on error with error message
     """
-    
+
     progress = pyqtSignal(int, int, str)
     log = pyqtSignal(str)
-    finished = pyqtSignal(str)
+    install_finished = pyqtSignal(str)
     error = pyqtSignal(str)
     
     def __init__(
@@ -160,7 +160,7 @@ class DatabaseInstallWorker(QThread):
             self.log.emit("-" * 50)
             self.log.emit(f"BLAST database installed successfully!")
             self.log.emit(f"Location: {db_dest_dir}")
-            self.finished.emit(db_dest_dir)
+            self.install_finished.emit(db_dest_dir)
         else:
             self.error.emit(
                 f"Installation may have failed. "
@@ -215,7 +215,7 @@ class DatabaseInstallWorker(QThread):
             self.log.emit("-" * 50)
             self.log.emit(f"MMseqs2 database installed successfully!")
             self.log.emit(f"Location: {db_dest_dir}")
-            self.finished.emit(db_dest_dir)
+            self.install_finished.emit(db_dest_dir)
         else:
             self.error.emit(
                 f"Installation may have failed. "

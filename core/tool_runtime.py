@@ -58,6 +58,18 @@ class ToolRuntime:
             return self.config.get_blastdbcmd_path()
         if tool_id == "clustalo":
             return self.config.get_clustalo_path()
+        if tool_id == "mafft":
+            return self.config.get_mafft_path()
+        if tool_id == "muscle":
+            return self.config.get_muscle_path()
+        if tool_id == "famsa":
+            return self.config.get_famsa_path()
+        if tool_id == "diamond":
+            return "diamond"
+        if tool_id == "famsa_gpu":
+            return "famsa-gpu"
+        if tool_id == "twilight":
+            return "twilight"
         return None
 
     def _resolve_managed(self, tool_id: str, spec: ToolSpec) -> ToolResolution | None:
