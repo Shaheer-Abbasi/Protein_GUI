@@ -1,4 +1,4 @@
-"""Run tiered alignment benchmarks (default sizes: 2k / 5k / 100k / 500k)."""
+"""Run tiered alignment benchmarks (default sizes: 2k / 100k / 500k)."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from benchmarks.runner import (
     try_resolve_executable,
 )
 
-DEFAULT_TIER_SIZES = (2000, 5000, 100000, 500000)
+DEFAULT_TIER_SIZES = (2000, 100000, 500000)
 
 ALL_TOOLS = ("clustalo", "mafft", "muscle", "famsa", "famsa_gpu", "twilight")
 ULTRA_TOOLS = ("famsa", "famsa_gpu", "twilight")
