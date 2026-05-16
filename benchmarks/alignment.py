@@ -153,6 +153,10 @@ def build_argv_famsa(
     return argv_for_resolution(resolution, cmd_parts)
 
 
+# TWILIGHT rejects -C outside 1..24 (runtime validation).
+TWILIGHT_MAX_CPU_CORES = 24
+
+
 def _ensure_guide_tree(input_fasta: str, threads: int) -> str | None:
     """Build a FAMSA NJ guide tree for TWILIGHT (cached per input file)."""
     import shutil as _sh
@@ -163,20 +167,25 @@ def _ensure_guide_tree(input_fasta: str, threads: int) -> str | None:
     famsa_bin = _sh.which("famsa")
     if not famsa_bin:
         return None
-    devnull = os.path.join(tempfile.gettempdir(), "famsa_tree_devnull.fasta")
     try:
+        # FAMSA 2.4+: two positional args after -gt_export: input FASTA, Newick output.
         _sp.run(
-            [famsa_bin, "-t", str(threads), "-gt", "nj", "-gt_export", tree_path,
-             input_fasta, devnull],
-            capture_output=True, timeout=600, check=False,
+            [
+                famsa_bin,
+                "-t",
+                str(threads),
+                "-gt",
+                "nj",
+                "-gt_export",
+                input_fasta,
+                tree_path,
+            ],
+            capture_output=True,
+            timeout=600,
+            check=False,
         )
     except Exception:
         return None
-    finally:
-        try:
-            os.unlink(devnull)
-        except OSError:
-            pass
     return tree_path if os.path.isfile(tree_path) else None
 
 
@@ -190,7 +199,8 @@ def build_argv_twilight(
 ) -> list[str]:
     inp = rt.prepare_path(resolution, input_native)
     outp = rt.prepare_path(resolution, output_native)
-    cmd_parts = ["-i", inp, "-o", outp, "-C", str(threads), "--type", "p", "--overwrite"]
+    twilight_threads = max(1, min(int(threads), TWILIGHT_MAX_CPU_CORES))
+    cmd_parts = ["-i", inp, "-o", outp, "-C", str(twilight_threads), "--type", "p", "--overwrite"]
     if tree_path and os.path.isfile(tree_path):
         cmd_parts.extend(["-t", rt.prepare_path(resolution, tree_path)])
     if cuda_available():
