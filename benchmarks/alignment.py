@@ -9,6 +9,9 @@ import tempfile
 import uuid
 from typing import Any
 
+from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
+
 from core.array_backend import cuda_available
 from core.tool_registry import ALIGNMENT_TOOL_IDS
 from core.tool_runtime import get_tool_runtime
@@ -157,6 +160,34 @@ def build_argv_famsa(
 TWILIGHT_MAX_CPU_CORES = 24
 
 
+def _materialize_twilight_safe_fasta(original_path: str) -> str:
+    """Copy *original_path* with short Newick-safe IDs for FAMSA tree export + TWILIGHT.
+
+    UniProt headers contain spaces/parens/colons that break Newick parsing when FAMSA
+    embeds full titles as tip names. Sequential ``twilight_seq_000001`` IDs avoid that.
+    """
+    safe_path = original_path + ".twilight_safe.fasta"
+    tree_path = safe_path + ".twilight_guide.nwk"
+    need_write = True
+    if os.path.isfile(safe_path) and os.path.isfile(original_path):
+        if os.path.getmtime(safe_path) >= os.path.getmtime(original_path):
+            need_write = False
+    if need_write:
+        try:
+            os.unlink(tree_path)
+        except OSError:
+            pass
+        out_recs: list[SeqRecord] = []
+        for i, rec in enumerate(SeqIO.parse(original_path, "fasta"), start=1):
+            nid = f"twilight_seq_{i:06d}"
+            out_recs.append(SeqRecord(rec.seq, id=nid, description=""))
+        parent = os.path.dirname(os.path.abspath(safe_path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        SeqIO.write(out_recs, safe_path, "fasta")
+    return safe_path
+
+
 def _ensure_guide_tree(input_fasta: str, threads: int) -> str | None:
     """Build a FAMSA NJ guide tree for TWILIGHT (cached per input file)."""
     import shutil as _sh
@@ -240,8 +271,9 @@ def run_one_alignment(
     elif tool_id in ("famsa", "famsa_gpu"):
         argv = build_argv_famsa(rt, resolution, input_path, out_native, threads)
     elif tool_id == "twilight":
-        tree = _ensure_guide_tree(input_path, threads)
-        argv = build_argv_twilight(rt, resolution, input_path, out_native, threads, tree)
+        safe_in = _materialize_twilight_safe_fasta(input_path)
+        tree = _ensure_guide_tree(safe_in, threads)
+        argv = build_argv_twilight(rt, resolution, safe_in, out_native, threads, tree)
     else:
         raise ValueError(f"Unsupported alignment tool: {tool_id}")
 
