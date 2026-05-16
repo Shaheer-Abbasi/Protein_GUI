@@ -558,7 +558,7 @@ class AlignmentWorker(QThread):
         return output_path
 
     def _run_twilight(self, resolution, input_path, seq_count):
-        """Run TWILIGHT MSA in iterative mode (no guide tree needed)."""
+        """Run TWILIGHT MSA (default mode, no guide tree)."""
         unique_id = str(uuid.uuid4())[:8]
         if resolution.backend == "wsl":
             output_path = f"/tmp/alignment_output_{unique_id}.fasta"
@@ -568,7 +568,6 @@ class AlignmentWorker(QThread):
         cmd_parts = [
             "-i", input_path,
             "-o", output_path,
-            "--iterative",
         ]
 
         from core.array_backend import cuda_available

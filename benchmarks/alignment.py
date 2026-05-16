@@ -110,6 +110,19 @@ def build_argv_mafft(
     return argv_for_resolution(resolution, cmd_parts)
 
 
+def _detect_muscle_version(exe: str) -> int:
+    """Return major version of muscle (3 or 5). Defaults to 5 on failure."""
+    import subprocess as _sp
+    try:
+        out = _sp.run([exe, "-version"], capture_output=True, text=True, timeout=10, check=False)
+        line = (out.stdout or out.stderr or "").strip()
+        if "muscle v3" in line.lower() or "muscle 3" in line.lower():
+            return 3
+    except Exception:
+        pass
+    return 5
+
+
 def build_argv_muscle(
     rt,
     resolution,
@@ -119,7 +132,11 @@ def build_argv_muscle(
 ) -> list[str]:
     inp = rt.prepare_path(resolution, input_native)
     outp = rt.prepare_path(resolution, output_native)
-    cmd_parts = ["-align", inp, "-output", outp, "-threads", str(threads)]
+    ver = _detect_muscle_version(resolution.executable or "muscle")
+    if ver == 3:
+        cmd_parts = ["-in", inp, "-out", outp]
+    else:
+        cmd_parts = ["-align", inp, "-output", outp, "-threads", str(threads)]
     return argv_for_resolution(resolution, cmd_parts)
 
 
@@ -144,7 +161,7 @@ def build_argv_twilight(
 ) -> list[str]:
     inp = rt.prepare_path(resolution, input_native)
     outp = rt.prepare_path(resolution, output_native)
-    cmd_parts = ["-i", inp, "-o", outp, "--iterative"]
+    cmd_parts = ["-i", inp, "-o", outp]
     if cuda_available():
         cmd_parts.append("--gpu")
     return argv_for_resolution(resolution, cmd_parts)
