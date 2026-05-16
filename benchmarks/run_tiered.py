@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import os
+import sys
 
 from core.array_backend import cuda_available
 from core.tool_registry import ALIGNMENT_TOOL_IDS
 from core.tool_runtime import get_tool_runtime
 
 from benchmarks.alignment import (
+    alignment_timeout,
     append_jsonl,
     effective_threads,
     run_one_alignment,
@@ -126,6 +129,14 @@ def main() -> None:
                 rep_record = 0
                 for i in range(total_runs):
                     is_warmup = i < args.warmup
+                    ts = datetime.datetime.now().strftime("%H:%M:%S")
+                    phase = "warmup" if is_warmup else f"rep {rep_record}"
+                    timeout_s = alignment_timeout(tool_id, n_seq)
+                    print(
+                        f"[{ts}] [start] tier={tier_idx} {tool_id} n={n_seq} "
+                        f"threads={eff_t} {phase} timeout={timeout_s:.0f}s",
+                        flush=True,
+                    )
                     if is_warmup:
                         run_one_alignment(
                             tool_id,
@@ -138,6 +149,7 @@ def main() -> None:
                             rt=rt,
                             tier=str(tier_idx),
                         )
+                        print(f"[{datetime.datetime.now().strftime('%H:%M:%S')}] [done] warmup finished", flush=True)
                         continue
                     row = run_one_alignment(
                         tool_id,
@@ -153,9 +165,11 @@ def main() -> None:
                     rep_record += 1
                     append_jsonl(out_abs, row)
                     tag = "OK" if row.get("exit_code") == 0 and not row.get("timed_out") else "FAIL"
+                    ts2 = datetime.datetime.now().strftime("%H:%M:%S")
                     print(
-                        f"[{tag}] tier={tier_idx} {tool_id} n={n_seq} threads={eff_t} "
-                        f"rep={row['repeat']} time={row['wall_seconds']:.2f}s"
+                        f"[{ts2}] [{tag}] tier={tier_idx} {tool_id} n={n_seq} threads={eff_t} "
+                        f"rep={row['repeat']} time={row['wall_seconds']:.2f}s",
+                        flush=True,
                     )
 
     print(f"Wrote {out_abs}")
