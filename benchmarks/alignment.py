@@ -153,17 +153,51 @@ def build_argv_famsa(
     return argv_for_resolution(resolution, cmd_parts)
 
 
+def _ensure_guide_tree(input_fasta: str, threads: int) -> str | None:
+    """Build a FAMSA NJ guide tree for TWILIGHT (cached per input file)."""
+    import shutil as _sh
+    import subprocess as _sp
+    tree_path = input_fasta + ".twilight_guide.nwk"
+    if os.path.isfile(tree_path) and os.path.getsize(tree_path) > 0:
+        return tree_path
+    famsa_bin = _sh.which("famsa")
+    if not famsa_bin:
+        return None
+    devnull = os.path.join(tempfile.gettempdir(), "famsa_tree_devnull.fasta")
+    try:
+        _sp.run(
+            [famsa_bin, "-t", str(threads), "-gt", "nj", "-gt_export", tree_path,
+             input_fasta, devnull],
+            capture_output=True, timeout=600, check=False,
+        )
+    except Exception:
+        return None
+    finally:
+        try:
+            os.unlink(devnull)
+        except OSError:
+            pass
+    return tree_path if os.path.isfile(tree_path) else None
+
+
 def build_argv_twilight(
     rt,
     resolution,
     input_native: str,
     output_native: str,
+    threads: int,
+    tree_path: str | None = None,
 ) -> list[str]:
     inp = rt.prepare_path(resolution, input_native)
     outp = rt.prepare_path(resolution, output_native)
-    cmd_parts = ["-i", inp, "-o", outp]
+    cmd_parts = ["-i", inp, "-o", outp, "-C", str(threads), "--type", "p", "--overwrite"]
+    if tree_path and os.path.isfile(tree_path):
+        cmd_parts.extend(["-t", rt.prepare_path(resolution, tree_path)])
     if cuda_available():
-        cmd_parts.append("--gpu")
+        cmd_parts.append("--gpu-index")
+        cmd_parts.append("0")
+    else:
+        cmd_parts.append("--cpu-only")
     return argv_for_resolution(resolution, cmd_parts)
 
 
@@ -196,7 +230,8 @@ def run_one_alignment(
     elif tool_id in ("famsa", "famsa_gpu"):
         argv = build_argv_famsa(rt, resolution, input_path, out_native, threads)
     elif tool_id == "twilight":
-        argv = build_argv_twilight(rt, resolution, input_path, out_native)
+        tree = _ensure_guide_tree(input_path, threads)
+        argv = build_argv_twilight(rt, resolution, input_path, out_native, threads, tree)
     else:
         raise ValueError(f"Unsupported alignment tool: {tool_id}")
 
