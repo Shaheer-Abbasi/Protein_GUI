@@ -36,7 +36,8 @@ def append_jsonl(path: str, obj: dict[str, Any]) -> None:
 
 
 def blast_db_exists(prefix: str) -> bool:
-    return os.path.isfile(prefix + ".phr") or os.path.isfile(prefix + ".00.phr")
+    suffixes = (".phr", ".pin", ".psq", ".00.phr", ".00.pin", ".00.psq")
+    return any(os.path.isfile(prefix + suffix) for suffix in suffixes)
 
 
 def sensitivity_value(name: str) -> str:
@@ -77,6 +78,103 @@ def resolve_blastdbcmd_exe(rt, blast_resolution) -> str | None:
         if os.path.isfile(cand):
             return cand
     return shutil.which("blastdbcmd")
+
+
+def resolve_makeblastdb_exe(blast_resolution) -> str | None:
+    """Locate makeblastdb next to blastp when possible."""
+    if blast_resolution and blast_resolution.executable:
+        cand = os.path.join(os.path.dirname(blast_resolution.executable), "makeblastdb")
+        if os.path.isfile(cand):
+            return cand
+    return shutil.which("makeblastdb")
+
+
+def ensure_blast_db_from_fasta(
+    target_fasta: str,
+    blast_prefix: str,
+    *,
+    blast_resolution,
+) -> tuple[float, str | None]:
+    """Build a protein BLAST database from FASTA. Returns (setup_wall_seconds, error_or_none)."""
+    if blast_db_exists(blast_prefix):
+        return 0.0, None
+    makeblastdb = resolve_makeblastdb_exe(blast_resolution)
+    if not makeblastdb:
+        return 0.0, "makeblastdb not found"
+    parent = os.path.dirname(blast_prefix)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    r = timed_run(
+        [
+            makeblastdb,
+            "-in",
+            target_fasta,
+            "-dbtype",
+            "prot",
+            "-out",
+            blast_prefix,
+        ],
+        timeout=7200,
+    )
+    if r.exit_code != 0 or r.timed_out or not blast_db_exists(blast_prefix):
+        return r.wall_seconds, r.stderr_snippet or "makeblastdb failed"
+    return r.wall_seconds, None
+
+
+def ensure_mmseqs_db_from_fasta(
+    target_fasta: str,
+    mmseqs_dest_prefix: str,
+    *,
+    rt,
+    mmseqs_res,
+) -> tuple[float, str | None]:
+    """Build an MMseqs2 database from FASTA. Returns (setup_wall_seconds, error_or_none)."""
+    if os.path.exists(mmseqs_dest_prefix + ".dbtype"):
+        return 0.0, None
+    parent = os.path.dirname(mmseqs_dest_prefix)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    argv_db = argv_for_resolution(
+        mmseqs_res,
+        [
+            "createdb",
+            rt.prepare_path(mmseqs_res, target_fasta),
+            rt.prepare_path(mmseqs_res, mmseqs_dest_prefix),
+        ],
+    )
+    cr = timed_run(argv_db, timeout=7200)
+    if cr.exit_code != 0 or cr.timed_out or not os.path.exists(mmseqs_dest_prefix + ".dbtype"):
+        return cr.wall_seconds, cr.stderr_snippet or "mmseqs createdb failed"
+    return cr.wall_seconds, None
+
+
+def ensure_mmseqs_gpu_db(
+    mmseqs_source_prefix: str,
+    mmseqs_gpu_dest_prefix: str,
+    *,
+    rt,
+    mmseqs_res,
+) -> tuple[float, str | None]:
+    """Build a GPU-padded MMseqs2 database. Returns (setup_wall_seconds, error_or_none)."""
+    if os.path.exists(mmseqs_gpu_dest_prefix + ".dbtype"):
+        return 0.0, None
+    if not os.path.exists(mmseqs_source_prefix + ".dbtype"):
+        return 0.0, f"MMseqs database missing: {mmseqs_source_prefix}"
+    parent = os.path.dirname(mmseqs_gpu_dest_prefix)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    argv_db = argv_for_resolution(
+        mmseqs_res,
+        [
+            "makepaddedseqdb",
+            rt.prepare_path(mmseqs_res, mmseqs_source_prefix),
+            rt.prepare_path(mmseqs_res, mmseqs_gpu_dest_prefix),
+        ],
+    )
+    cr = timed_run(argv_db, timeout=7200)
+    if cr.exit_code != 0 or cr.timed_out or not os.path.exists(mmseqs_gpu_dest_prefix + ".dbtype"):
+        return cr.wall_seconds, cr.stderr_snippet or "mmseqs makepaddedseqdb failed"
+    return cr.wall_seconds, None
 
 
 def ensure_mmseqs_db_from_blast(
@@ -189,6 +287,38 @@ def ensure_dmnd_from_blast(
     return dmnd_path, wall, None
 
 
+def ensure_dmnd_from_fasta(
+    target_fasta: str,
+    dmnd_prefix: str,
+    *,
+    rt,
+    diamond_res,
+) -> tuple[str | None, float, str | None]:
+    """Build a DIAMOND database directly from FASTA. Returns (db prefix or None, setup_wall_seconds, error)."""
+    dmnd_path = dmnd_prefix + ".dmnd"
+    if os.path.isfile(dmnd_path):
+        return dmnd_prefix, 0.0, None
+    parent = os.path.dirname(dmnd_prefix)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    argv = argv_for_resolution(
+        diamond_res,
+        [
+            "makedb",
+            "--in",
+            rt.prepare_path(diamond_res, target_fasta),
+            "-d",
+            rt.prepare_path(diamond_res, dmnd_prefix),
+        ],
+    )
+    mk = timed_run(argv, timeout=7200)
+    if mk.exit_code != 0 or mk.timed_out:
+        return None, mk.wall_seconds, mk.stderr_snippet or "diamond makedb failed"
+    if not os.path.isfile(dmnd_path):
+        return None, mk.wall_seconds, "diamond makedb did not produce .dmnd"
+    return dmnd_prefix, mk.wall_seconds, None
+
+
 def run_mmseqs_cpu_pipeline(
     *,
     mmseqs_res,
@@ -269,12 +399,16 @@ def run_mmseqs_cpu_pipeline(
 def main() -> None:
     ap = argparse.ArgumentParser(description="Benchmark local protein search tools.")
     ap.add_argument("--query", required=True, help="Query FASTA (first record used like GUI workers).")
-    ap.add_argument("--db", required=True, help="Database prefix path (BLAST) or MMseqs DB.")
+    ap.add_argument(
+        "--target-fasta",
+        help="Target FASTA to build BLAST/MMseqs2/DIAMOND databases automatically in --work-dir.",
+    )
+    ap.add_argument("--db", help="Existing database prefix path (BLAST) or MMseqs DB.")
     ap.add_argument(
         "--db-type",
         choices=("blast", "mmseqs"),
         default="blast",
-        help="Interpret --db as BLAST prefix or existing MMseqs DB.",
+        help="Interpret --db as BLAST prefix or existing MMseqs DB (ignored when --target-fasta is used).",
     )
     ap.add_argument("--tools", default="blastp,mmseqs,mmseqs_gpu,diamond", help="Comma-separated.")
     ap.add_argument("--top-k", type=int, default=100)
@@ -293,7 +427,8 @@ def main() -> None:
     versions = collect_search_tool_versions()
     meta = collect_system_metadata(versions)
     meta["db_type"] = args.db_type
-    meta["blast_db"] = os.path.abspath(args.db)
+    meta["target_fasta"] = os.path.abspath(args.target_fasta) if args.target_fasta else None
+    meta["db"] = os.path.abspath(args.db) if args.db else None
     meta_path = os.path.join(os.path.dirname(os.path.abspath(args.out)) or ".", "search_session_meta.json")
     dump_metadata_json(meta_path, meta)
 
@@ -307,18 +442,85 @@ def main() -> None:
     query_single = os.path.join(work_root, "bench_query_single.fasta")
     SeqIO.write(records[0], query_single, "fasta")
 
-    blast_prefix = os.path.abspath(args.db)
+    if not args.target_fasta and not args.db:
+        raise SystemExit("Provide either --target-fasta (auto-build DBs) or --db (existing DB prefix).")
+
+    blast_prefix = os.path.abspath(args.db) if args.db else os.path.join(work_root, "blast_target_db", "target")
     mmseqs_target = blast_prefix
+    mmseqs_gpu_target = mmseqs_target
 
     mmseqs_res, _ = try_resolve_executable("mmseqs")
     blast_res, _ = try_resolve_executable("blastp")
     diamond_res, _ = try_resolve_executable("diamond")
 
-    needs_mmseqs_conversion = args.db_type == "blast" and any(
-        t in tools_requested for t in ("mmseqs", "mmseqs_gpu")
-    )
+    target_fasta = os.path.abspath(args.target_fasta) if args.target_fasta else None
+    if target_fasta:
+        if not os.path.isfile(target_fasta):
+            raise SystemExit(f"Target FASTA not found:\n  {target_fasta}")
+        meta["target_fasta"] = target_fasta
+        db_root = os.path.join(work_root, "auto_dbs")
 
-    if args.db_type == "blast":
+        if "blastp" in tools_requested:
+            if blast_res is None:
+                print("[skip] blastp: blastp not available.")
+            else:
+                blast_prefix = os.path.join(db_root, "blast", "target")
+                prep_wall, err_msg = ensure_blast_db_from_fasta(
+                    target_fasta,
+                    blast_prefix,
+                    blast_resolution=blast_res,
+                )
+                meta["blast_prep_wall_seconds"] = prep_wall
+                if err_msg:
+                    print(f"[warn] BLAST DB preparation failed: {err_msg}")
+
+        if any(t in tools_requested for t in ("mmseqs", "mmseqs_gpu")):
+            if mmseqs_res is None:
+                print("[skip] mmseqs/mmseqs_gpu: MMseqs2 not available.")
+            else:
+                mmseqs_target = os.path.join(db_root, "mmseqs", "target")
+                prep_wall, err_msg = ensure_mmseqs_db_from_fasta(
+                    target_fasta,
+                    mmseqs_target,
+                    rt=rt,
+                    mmseqs_res=mmseqs_res,
+                )
+                meta["mmseqs_prep_wall_seconds"] = prep_wall
+                if err_msg:
+                    print(f"[warn] MMseqs DB preparation failed: {err_msg}")
+                mmseqs_gpu_target = mmseqs_target
+                if "mmseqs_gpu" in tools_requested and not err_msg:
+                    mmseqs_gpu_target = os.path.join(db_root, "mmseqs", "target_gpu")
+                    gpu_prep_wall, gpu_err = ensure_mmseqs_gpu_db(
+                        mmseqs_target,
+                        mmseqs_gpu_target,
+                        rt=rt,
+                        mmseqs_res=mmseqs_res,
+                    )
+                    meta["mmseqs_gpu_prep_wall_seconds"] = gpu_prep_wall
+                    if gpu_err:
+                        print(f"[warn] MMseqs GPU DB preparation failed: {gpu_err}")
+
+        dmnd_path: str | None = None
+        if "diamond" in tools_requested:
+            if diamond_res is None:
+                print("[skip] diamond: DIAMOND not available.")
+            else:
+                dmnd_path, dmnd_prep_wall, derr = ensure_dmnd_from_fasta(
+                    target_fasta,
+                    os.path.join(db_root, "diamond", "target"),
+                    rt=rt,
+                    diamond_res=diamond_res,
+                )
+                meta["diamond_prep_wall_seconds"] = dmnd_prep_wall
+                if derr:
+                    print(f"[warn] DIAMOND DB preparation failed: {derr}")
+                    dmnd_path = None
+
+        dump_metadata_json(meta_path, meta)
+
+    elif args.db_type == "blast":
+        needs_mmseqs_conversion = any(t in tools_requested for t in ("mmseqs", "mmseqs_gpu"))
         if not blast_db_exists(blast_prefix):
             raise SystemExit(f"BLAST database files not found for prefix:\n  {blast_prefix}")
         if needs_mmseqs_conversion:
@@ -341,16 +543,47 @@ def main() -> None:
                     mmseqs_target = mmseqs_cached
                 elif err_msg:
                     print(f"[warn] MMseqs DB preparation failed: {err_msg}")
+                mmseqs_gpu_target = mmseqs_target
+                if "mmseqs_gpu" in tools_requested and os.path.exists(mmseqs_target + ".dbtype"):
+                    mmseqs_gpu_cached = os.path.join(work_root, "mmseqs_target_db_gpu")
+                    gpu_prep_wall, gpu_err = ensure_mmseqs_gpu_db(
+                        mmseqs_target,
+                        mmseqs_gpu_cached,
+                        rt=rt,
+                        mmseqs_res=mmseqs_res,
+                    )
+                    meta["mmseqs_gpu_prep_wall_seconds"] = gpu_prep_wall
+                    dump_metadata_json(meta_path, meta)
+                    if os.path.exists(mmseqs_gpu_cached + ".dbtype"):
+                        mmseqs_gpu_target = mmseqs_gpu_cached
+                    elif gpu_err:
+                        print(f"[warn] MMseqs GPU DB preparation failed: {gpu_err}")
 
     elif args.db_type == "mmseqs":
         mmseqs_target = blast_prefix
+        mmseqs_gpu_target = mmseqs_target
         if not os.path.exists(mmseqs_target + ".dbtype"):
             raise SystemExit(
                 f"MMseqs database not found at prefix (missing .dbtype):\n  {mmseqs_target}"
             )
+        if "mmseqs_gpu" in tools_requested and mmseqs_res is not None:
+            mmseqs_gpu_cached = os.path.join(work_root, "mmseqs_target_db_gpu")
+            gpu_prep_wall, gpu_err = ensure_mmseqs_gpu_db(
+                mmseqs_target,
+                mmseqs_gpu_cached,
+                rt=rt,
+                mmseqs_res=mmseqs_res,
+            )
+            meta["mmseqs_gpu_prep_wall_seconds"] = gpu_prep_wall
+            dump_metadata_json(meta_path, meta)
+            if os.path.exists(mmseqs_gpu_cached + ".dbtype"):
+                mmseqs_gpu_target = mmseqs_gpu_cached
+            elif gpu_err:
+                print(f"[warn] MMseqs GPU DB preparation failed: {gpu_err}")
 
-    dmnd_path: str | None = None
-    if "diamond" in tools_requested and args.db_type == "blast":
+    if "dmnd_path" not in locals():
+        dmnd_path = None
+    if "diamond" in tools_requested and not target_fasta and args.db_type == "blast":
         if diamond_res is None:
             pass
         else:
@@ -455,7 +688,7 @@ def main() -> None:
             tmp_mm = os.path.join(tmp, "tmp")
             os.makedirs(tmp_mm, exist_ok=True)
             q_tool = rt.prepare_path(mmseqs_res, query_single)
-            db_tool = rt.prepare_path(mmseqs_res, mmseqs_target)
+            db_tool = rt.prepare_path(mmseqs_res, mmseqs_gpu_target)
             out_tool = rt.prepare_path(mmseqs_res, out_m8)
             tmp_tool = rt.prepare_path(mmseqs_res, tmp_mm)
             cmd_parts = [
@@ -466,8 +699,6 @@ def main() -> None:
                 tmp_tool,
                 "--search-type",
                 "1",
-                "-s",
-                sensitivity_value(args.sensitivity),
                 "--max-seqs",
                 str(args.top_k),
                 "--format-output",
@@ -572,6 +803,9 @@ def main() -> None:
             if blast_res is None:
                 print("[skip] blastp not available.")
                 continue
+            if not blast_db_exists(blast_prefix):
+                print("[skip] blastp: BLAST database missing.")
+                continue
         elif tool == "mmseqs":
             if mmseqs_res is None:
                 print("[skip] mmseqs not available.")
@@ -586,8 +820,8 @@ def main() -> None:
             if not cuda_available():
                 print("[skip] mmseqs_gpu: CUDA GPU not detected (nvidia-smi).")
                 continue
-            if not os.path.exists(mmseqs_target + ".dbtype"):
-                print("[skip] mmseqs_gpu: MMseqs database missing (.dbtype).")
+            if not os.path.exists(mmseqs_gpu_target + ".dbtype"):
+                print("[skip] mmseqs_gpu: MMseqs GPU database missing (.dbtype).")
                 continue
         elif tool == "diamond":
             if diamond_res is None:

@@ -145,7 +145,7 @@ def build_argv_muscle(
     outp = rt.prepare_path(resolution, output_native)
     ver = _detect_muscle_version(resolution.executable or "muscle")
     if ver == 3:
-        cmd_parts = ["-in", inp, "-out", outp]
+        cmd_parts = ["-in", inp, "-out", outp, "-maxiters", "2", "-diags"]
     else:
         cmd_parts = ["-align", inp, "-output", outp, "-threads", str(threads)]
     return argv_for_resolution(resolution, cmd_parts)
