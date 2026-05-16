@@ -45,7 +45,13 @@ def alignment_timeout(tool_id: str, seq_count: int) -> float:
     """Wall-clock cap for subprocess; scales with *seq_count*, more aggressively past 10k."""
     base = BASE_ALIGNMENT_TIMEOUT
     if tool_id in ("famsa", "famsa_gpu"):
-        return float(max(base, seq_count // 50 + 120))
+        # Short tiers stay responsive; Pfam ultra tiers need tens of hours on long proteins.
+        if seq_count <= 5_000:
+            return float(max(base, seq_count // 40 + 240))
+        if seq_count <= 100_000:
+            return float(max(3600.0 * 14, seq_count / 750.0 * 3600))
+        # 500k+: allow multi-day heroic runs (still capped ~8 days).
+        return float(min(691_200.0, max(3600.0 * 48, seq_count / 400.0 * 3600)))
     classical_mult = 5 if seq_count >= 10_000 else 3
     if tool_id == "mafft":
         return float(max(base, seq_count * classical_mult))
@@ -190,7 +196,16 @@ def _materialize_twilight_safe_fasta(original_path: str) -> str:
     return safe_path
 
 
-def _ensure_guide_tree(input_fasta: str, threads: int) -> tuple[str | None, str]:
+def _guide_tree_subprocess_timeout(seq_count: int) -> float:
+    """Seconds for ``famsa -gt_export`` (NJ). Large *N* can exceed many hours."""
+    if seq_count <= 5_000:
+        return 14_400.0  # 4 h floor for noisy hosts
+    if seq_count <= 100_000:
+        return 172_800.0  # 48 h — short timeouts killed tier-2 Twilight before alignment
+    return 691_200.0  # 192 h hero tier
+
+
+def _ensure_guide_tree(input_fasta: str, threads: int, seq_count: int) -> tuple[str | None, str]:
     """Build FAMSA NJ guide tree for TWILIGHT. Returns ``(path, \"\")`` or ``(None, error)``.
 
     Drops cached ``*.twilight_guide.nwk`` if older than *input_fasta* so labels stay in sync.
@@ -213,6 +228,7 @@ def _ensure_guide_tree(input_fasta: str, threads: int) -> tuple[str | None, str]
     if not famsa_exe:
         return None, "famsa not resolved (needed for TWILIGHT guide tree)"
 
+    budget = _guide_tree_subprocess_timeout(seq_count)
     try:
         proc = subprocess.run(
             [
@@ -226,11 +242,14 @@ def _ensure_guide_tree(input_fasta: str, threads: int) -> tuple[str | None, str]
                 tree_path,
             ],
             capture_output=True,
-            timeout=600,
+            timeout=budget,
             check=False,
         )
     except subprocess.TimeoutExpired:
-        return None, "famsa -gt_export timed out building guide tree"
+        return (
+            None,
+            f"famsa -gt_export timed out ({budget:.0f}s) building guide tree (try smaller tier or fewer threads)",
+        )
     except Exception as exc:
         return None, f"famsa -gt_export error: {exc}"
 
@@ -295,7 +314,7 @@ def run_one_alignment(
         argv = build_argv_famsa(rt, resolution, input_path, out_native, threads)
     elif tool_id == "twilight":
         safe_in = _materialize_twilight_safe_fasta(input_path)
-        tree_path, tree_err = _ensure_guide_tree(safe_in, threads)
+        tree_path, tree_err = _ensure_guide_tree(safe_in, threads, seq_count)
         argv = (
             build_argv_twilight(rt, resolution, safe_in, out_native, threads, tree_path)
             if tree_path
