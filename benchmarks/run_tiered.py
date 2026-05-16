@@ -25,25 +25,26 @@ from benchmarks.runner import (
     try_resolve_executable,
 )
 
-DEFAULT_TIER_SIZES = (2000, 10000, 100000, 500000)
+DEFAULT_TIER_SIZES = (5000, 100000, 500000)
 
 ALL_TOOLS = ("clustalo", "mafft", "muscle", "famsa", "famsa_gpu", "twilight")
 ULTRA_TOOLS = ("famsa", "famsa_gpu", "twilight")
 
+ALL_TOOLS_THRESHOLD = 10_000
+
 
 def parse_tiers(spec: str) -> list[int]:
     out = [int(x.strip()) for x in spec.split(",") if x.strip()]
-    if len(out) != 4:
-        raise SystemExit("--tiers must be exactly four comma-separated integers.")
+    if not out:
+        raise SystemExit("--tiers must have at least one positive integer.")
     if any(x <= 0 for x in out):
         raise SystemExit("--tiers values must be positive.")
-    # assume sorted by index 1..4 (not enforced strictly ascending)
     return out
 
 
-def tools_for_tier_index(tier_index_zero_based: int) -> tuple[str, ...]:
-    """Tiers 0–1 (UI: 1–2) use all tools; tiers 2–3 use ultra-scale tools only."""
-    if tier_index_zero_based < 2:
+def tools_for_size(n: int) -> tuple[str, ...]:
+    """Sizes <= ALL_TOOLS_THRESHOLD use all tools; larger uses ultra-scale only."""
+    if n <= ALL_TOOLS_THRESHOLD:
         return ALL_TOOLS
     return ULTRA_TOOLS
 
@@ -78,7 +79,7 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=42, help="Reservoir seed for all subsets")
     args = ap.parse_args()
 
-    sizes = tuple(parse_tiers(args.tiers))
+    sizes = parse_tiers(args.tiers)
     thread_list = [int(x.strip()) for x in args.threads.split(",") if x.strip()]
 
     work_dir = os.path.abspath(args.work_dir)
@@ -109,7 +110,7 @@ def main() -> None:
         label = f"tier{ti}_n{n}"
         dst = os.path.join(work_dir, f"{label}.fasta")
         wrote = subset_fasta(src, n, dst, seed=args.seed)
-        tools = tools_for_tier_index(ti - 1)
+        tools = tools_for_size(n)
         ladder.append((ti, dst, wrote, tools))
         print(f"[prep] tier {ti} seq_count={wrote} -> {dst} tools={tools}")
 
