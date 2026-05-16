@@ -143,6 +143,7 @@ class HomePage(QWidget):
             ("alignment",      "Sequence Alignment", "Multiple sequence alignment (Clustal Omega, MAFFT, MUSCLE, or FAMSA) with MSA viewer",        "bar-chart-2"),
             ("phylo",          "Phylogenetic Analysis", "Hierarchical clustering on pairwise identity; interactive dendrogram and reference-branch extraction", "layers"),
             ("motif_search",   "Motif Search",       "Find glycosylation motifs in protein sequences with visualisation",                  "filter"),
+            ("structure",      "Structural Mapping", "Color residues by IC/sector and view structure from RCSB", "package"),
             ("database_downloads","Database Downloads","Download and manage protein databases for BLAST and MMseqs2 searches",             "database"),
         ]
 
@@ -153,6 +154,7 @@ class HomePage(QWidget):
             "alignment": "alignment",
             "phylo": "phylo",
             "motif_search": "motif",
+            "structure": "structure",
             "database_downloads": "database",
         }
         for idx, (sid, title_text, desc, icon) in enumerate(services):

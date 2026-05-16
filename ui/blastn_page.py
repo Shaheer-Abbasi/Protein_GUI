@@ -268,7 +268,7 @@ class BLASTNPage(QWidget):
         r2 = QHBoxLayout()
         r2.addWidget(QLabel("Max Hits:"))
         self.max_targets_input = QSpinBox()
-        self.max_targets_input.setRange(1, 5000)
+        self.max_targets_input.setRange(1, 2_147_483_647)
         self.max_targets_input.setValue(100)
         r2.addWidget(self.max_targets_input)
         r2.addSpacing(16)

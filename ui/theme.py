@@ -172,6 +172,7 @@ PAGE_ACCENTS = {
     "motif":       "#E91E63",
     "tools":       "#607D8B",
     "database":    "#00897B",
+    "structure":   "#9B59B6",
 }
 
 

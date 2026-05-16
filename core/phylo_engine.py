@@ -24,9 +24,6 @@ except ImportError:  # pragma: no cover
 
 GAP_CHARS = set("-.*")
 
-# Out-of-scope for v1 — memory / time guard
-MAX_SEQUENCES = 5000
-
 LINKAGE_METHODS = ("average", "complete", "single")
 
 
@@ -240,11 +237,6 @@ def run_phylo_analysis(
 
     Returns (encoding, identity, distance, Z).
     """
-    if len(seqs) > MAX_SEQUENCES:
-        raise ValueError(
-            f"This version supports at most {MAX_SEQUENCES} sequences "
-            f"(got {len(seqs)})."
-        )
     if len(seqs) < 2:
         raise ValueError("Need at least two sequences for a phylogenetic tree.")
 

@@ -271,7 +271,7 @@ class ProteinSearchPage(QWidget):
         r1.addSpacing(16)
         r1.addWidget(QLabel("Max Hits:"))
         self.max_targets_input = QSpinBox()
-        self.max_targets_input.setRange(1, 5000)
+        self.max_targets_input.setRange(1, 2_147_483_647)
         self.max_targets_input.setValue(100)
         r1.addWidget(self.max_targets_input)
         r1.addStretch()

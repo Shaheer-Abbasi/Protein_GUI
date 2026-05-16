@@ -63,8 +63,9 @@ class ClusterSelectionDialog(QDialog):
         self.mode_button_group.addButton(self.top_n_radio, 1)
         
         self.top_n_spin = QSpinBox()
-        self.top_n_spin.setRange(2, min(500, len(self.search_hits)))
-        self.top_n_spin.setValue(min(50, len(self.search_hits)))
+        n_hits = len(self.search_hits)
+        self.top_n_spin.setRange(2, max(2, n_hits))
+        self.top_n_spin.setValue(min(50, max(2, n_hits)))
         self.top_n_spin.setFixedWidth(100)
         self.top_n_spin.valueChanged.connect(self._on_top_n_changed)
         

@@ -18,19 +18,14 @@ class AlignmentError(Exception):
     pass
 
 
-# Max sequences per aligner (FAMSA is designed for very large inputs).
-MAX_SEQUENCES_BY_TOOL = {
-    "clustalo": 2000,
-    "mafft": 2000,
-    "muscle": 2000,
-    "famsa": 100_000,
-    "famsa_gpu": 100_000,
-    "twilight": 1_000_000,
-}
+def max_sequences_for_tool(tool_id: str) -> int | None:
+    """Return ``None``: the GUI does not impose a sequence-count cap.
 
-
-def max_sequences_for_tool(tool_id: str) -> int:
-    return MAX_SEQUENCES_BY_TOOL.get(tool_id, 2000)
+    Alignment scale limits are defined only by the external aligner (same as on the
+    command line). *tool_id* is accepted for API compatibility with callers that
+    refresh validation when the aligner changes.
+    """
+    return None
 
 
 def aligner_display_name(tool_id: str) -> str:
@@ -105,7 +100,8 @@ class AlignmentWorker(QThread):
         self._temp_files = []
 
     @property
-    def max_sequences(self):
+    def max_sequences(self) -> int | None:
+        """``None`` means no application-level cap (aligner limits apply)."""
         return max_sequences_for_tool(self.tool_id)
 
     def cancel(self):
@@ -127,10 +123,11 @@ class AlignmentWorker(QThread):
             if seq_count < 2:
                 raise AlignmentError("At least 2 sequences are required for alignment")
 
-            if seq_count > self.max_sequences:
+            lim = self.max_sequences
+            if lim is not None and seq_count > lim:
                 raise AlignmentError(
-                    f"Too many sequences ({seq_count}). Maximum for {display} is {self.max_sequences}.\n"
-                    "Consider reducing the number of sequences or choosing another aligner (e.g. FAMSA for large sets)."
+                    f"Too many sequences ({seq_count}). Maximum allowed is {lim}.\n"
+                    "Reduce the number of sequences or change settings."
                 )
 
             if self._cancelled:
@@ -700,13 +697,13 @@ class SequenceAlignmentPrep:
             return False, f"Error preparing sequences: {str(e)}", 0
 
     @staticmethod
-    def validate_fasta_for_alignment(fasta_path, max_sequences=2000):
+    def validate_fasta_for_alignment(fasta_path, max_sequences: int | None = None):
         """
         Validate a FASTA file for alignment.
 
         Args:
             fasta_path: Path to FASTA file
-            max_sequences: Maximum allowed sequences (depends on selected aligner)
+            max_sequences: Optional hard cap on sequence count (``None`` = no limit).
 
         Returns:
             tuple: (is_valid: bool, message: str, sequence_count: int)
@@ -742,7 +739,7 @@ class SequenceAlignmentPrep:
             if count < 2:
                 return False, "At least 2 sequences are required for alignment", count
 
-            if count > max_sequences:
+            if max_sequences is not None and count > max_sequences:
                 return False, f"Too many sequences ({count}). Maximum is {max_sequences}", count
 
             return True, f"{count} sequences (length range: {min_len}-{max_len} aa)", count

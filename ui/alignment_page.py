@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QLineEdit, QComboBox, QGroupBox, QTextEdit,
@@ -177,7 +178,7 @@ class AlignmentPage(QWidget):
         iter_row = QHBoxLayout()
         iter_row.addWidget(QLabel("Iterations:"))
         self.iter_spin = QSpinBox()
-        self.iter_spin.setRange(0, 5)
+        self.iter_spin.setRange(0, 9999)
         self.iter_spin.setValue(0)
         self.iter_spin.setToolTip("Number of combined iterations (0 = auto)")
         iter_row.addWidget(self.iter_spin)
@@ -1074,6 +1075,27 @@ class AlignmentPage(QWidget):
         if not dlg.ensure_loaded(self._pysca_db_path):
             return
         dlg.show_raised()
+
+    def load_external_pysca_db(self, path: str, *, show_dialog: bool = True) -> bool:
+        """Attach an on-disk .db to this page and optionally open the results dialog."""
+        path_str = str(Path(path).resolve())
+        if not os.path.isfile(path_str):
+            QMessageBox.warning(self, "pySCA", "File not found.")
+            return False
+        self._pysca_db_path = path_str
+        dlg = self._ensure_pysca_results_dialog()
+        if not dlg.load_db_path(path_str):
+            return False
+        self.pysca_save_db_btn.setEnabled(True)
+        self.pysca_export_csv_btn.setEnabled(True)
+        self.pysca_open_folder_btn.setEnabled(False)
+        self.pysca_results_strip.set_status(
+            'External .db loaded — use "Open results window" for plots and structure colouring.'
+        )
+        self.pysca_results_strip.setVisible(True)
+        if show_dialog:
+            dlg.show_raised()
+        return True
 
     def _on_pysca_run_log(self, msg):
         self.pysca_log.append(msg)

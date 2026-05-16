@@ -545,7 +545,7 @@ class ClusteringPage(QWidget):
             self.chart_label.setText(f"Chart generation failed: {result}")
             self.maximize_chart_button.setEnabled(False)
 
-        table_data = get_cluster_table_data(stats, max_rows=1000)
+        table_data = get_cluster_table_data(stats, max_rows=None)
         self.clusters_table.setRowCount(len(table_data))
         for row, (cluster_id, rep_id, size, members) in enumerate(table_data):
             self.clusters_table.setItem(row, 0, QTableWidgetItem(str(cluster_id)))

@@ -9,7 +9,7 @@ from PyQt5.QtGui import QCloseEvent
 from core.alignment_worker import AlignmentWorker
 from core.clustering_worker import ClusteringWorker
 from ui.theme import get_theme
-from ui.icons import feather_icon, set_button_icon
+from ui.icons import feather_icon
 from ui.home_page import HomePage
 from ui.protein_search_page import ProteinSearchPage
 from ui.blastn_page import BLASTNPage
@@ -19,10 +19,11 @@ from ui.motif_search_page import MotifSearchPage
 from ui.database_downloads_page import DatabaseDownloadsPage
 from ui.tools_page import ToolsPage
 from ui.phylo_page import PhyloPage
+from ui.structure_page import StructureMappingPage
 
 TAB_ICONS = [
     "home", "search", "search",
-    "grid", "bar-chart-2", "layers", "filter", "tool", "database",
+    "grid", "bar-chart-2", "layers", "package", "filter", "tool", "database",
 ]
 
 
@@ -59,6 +60,7 @@ class ProteinGUI(QMainWindow):
         self.motif_search_page = MotifSearchPage()
         self.tools_page = ToolsPage()
         self.database_downloads_page = DatabaseDownloadsPage()
+        self.structure_page = StructureMappingPage()
 
         # Add tabs with Feather icons
         self.tabs.addTab(self.home_page,               feather_icon("home", 18),           "Home")
@@ -67,6 +69,7 @@ class ProteinGUI(QMainWindow):
         self.tabs.addTab(self.clustering_page,          feather_icon("grid", 18),           "Clustering")
         self.tabs.addTab(self.alignment_page,           feather_icon("bar-chart-2", 18),    "Alignment")
         self.tabs.addTab(self.phylo_page,               feather_icon("layers", 18),          "Phylogenetic Analysis")
+        self.tabs.addTab(self.structure_page,           feather_icon("package", 18),           "Structural Mapping")
         self.tabs.addTab(self.motif_search_page,        feather_icon("filter", 18),         "Motif Search")
         self.tabs.addTab(self.tools_page,               feather_icon("tool", 18),           "Tools")
         self.tabs.addTab(self.database_downloads_page,  feather_icon("database", 18),       "Databases")
@@ -101,6 +104,8 @@ class ProteinGUI(QMainWindow):
         self.phylo_page.navigate_to_clustering.connect(self._show_clustering_with_fasta)
         self.alignment_page.navigate_to_phylo.connect(self._show_phylo_with_fasta_text)
 
+        self.structure_page.send_to_alignment_pysca.connect(self._structure_send_to_alignment)
+
         self.tabs.currentChanged.connect(self._on_tab_changed)
 
     def _navigate_from_home(self, service: str):
@@ -113,6 +118,7 @@ class ProteinGUI(QMainWindow):
             "motif_search":       self.motif_search_page,
             "tools":              self.tools_page,
             "database_downloads": self.database_downloads_page,
+            "structure":          self.structure_page,
         }
         page = page_map.get(service)
         if page:
@@ -126,9 +132,10 @@ class ProteinGUI(QMainWindow):
             3: "Sen Lab - MMseqs2 Clustering",
             4: "Sen Lab - Sequence Alignment",
             5: "Sen Lab - Phylogenetic Analysis",
-            6: "Sen Lab - Motif Search",
-            7: "Sen Lab - Tools",
-            8: "Sen Lab - Database Downloads",
+            6: "Sen Lab - Structural Mapping",
+            7: "Sen Lab - Motif Search",
+            8: "Sen Lab - Tools",
+            9: "Sen Lab - Database Downloads",
         }
         self.setWindowTitle(titles.get(index, "Sen Lab"))
 
@@ -143,6 +150,10 @@ class ProteinGUI(QMainWindow):
     def _show_phylo_with_fasta_text(self, fasta_text: str):
         self.phylo_page.load_fasta_text(fasta_text, show_error=False)
         self.tabs.setCurrentWidget(self.phylo_page)
+
+    def _structure_send_to_alignment(self, db_path: str):
+        if self.alignment_page.load_external_pysca_db(db_path, show_dialog=True):
+            self.tabs.setCurrentWidget(self.alignment_page)
 
     def _on_theme_changed(self, theme_name: str):
         self._update_theme_button()
@@ -205,6 +216,15 @@ class ProteinGUI(QMainWindow):
             self.alignment_page._pysca_export_worker,
             getattr(self.phylo_page, "phylo_worker", None),
         ]
+
+        dlg = getattr(self.alignment_page, "_pysca_results_dialog", None)
+        if dlg is not None:
+            fn = getattr(dlg, "_stop_structure_fetch", None)
+            if callable(fn):
+                fn()
+
+        self.structure_page.shutdown_workers()
+
         for w in workers:
             if w is None or not w.isRunning():
                 continue

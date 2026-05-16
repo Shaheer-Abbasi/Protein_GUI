@@ -75,11 +75,7 @@ def sequence_weights(binary) -> np.ndarray:
     M = binary.shape[0]
     L = binary.shape[1] // N_STATES
 
-    if M > 2000:
-        # Subsample for speed
-        return xp.ones(M, dtype=xp.float64)
-
-    # Pairwise identity via dot product on binary matrix
+    # Pairwise identity via dot product on binary matrix (M×M — large M uses a lot of memory)
     sim = (binary @ binary.T) / L  # M x M, each entry = fraction identical
     counts = xp.sum(sim >= 0.8, axis=1).astype(xp.float64)
     counts = xp.maximum(counts, 1.0)

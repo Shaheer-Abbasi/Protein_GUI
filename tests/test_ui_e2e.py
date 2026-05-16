@@ -186,6 +186,9 @@ def _is_safe_button(button):
         r"use system",
         r"search .*database",
         r"search ncbi",
+        r"\brcsb\b",
+        r"\bfetch\b",
+        r"\bsend\b",
     ]
     return not any(re.search(pattern, text) for pattern in skip_patterns)
 
@@ -198,6 +201,7 @@ def test_main_window_tabs_and_home_navigation(main_window, qt_app):
         "Clustering",
         "Alignment",
         "Phylogenetic Analysis",
+        "Structural Mapping",
         "Motif Search",
         "Tools",
         "Databases",
@@ -220,6 +224,7 @@ def test_main_window_tabs_and_home_navigation(main_window, qt_app):
         "motif_search": "Motif Search",
         "tools": "Tools",
         "database_downloads": "Databases",
+        "structure": "Structural Mapping",
     }
 
     for service, tab_title in home_targets.items():
