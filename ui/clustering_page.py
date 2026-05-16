@@ -234,6 +234,7 @@ class ClusteringPage(QWidget):
 
         # ── Bottom: results tabs ─────────────────────────────────
         self.results_tabs = QTabWidget()
+        self.results_tabs.setObjectName("resultsTabs")
         self.results_tabs.hide()
 
         # Tab 1: Overview
@@ -289,14 +290,14 @@ class ClusteringPage(QWidget):
         et.addWidget(QLabel("Export clustering results in various formats:"))
 
         export_tsv_btn = QPushButton("Export as TSV (Cluster Assignments)")
-        export_tsv_btn.setProperty("class", "success")
-        set_button_icon(export_tsv_btn, "download", 14, "#FFFFFF")
+        export_tsv_btn.setProperty("class", "secondary")
+        set_button_icon(export_tsv_btn, "download", 14)
         export_tsv_btn.clicked.connect(self.export_tsv)
         et.addWidget(export_tsv_btn)
 
         export_fasta_btn = QPushButton("Export Representatives as FASTA")
-        export_fasta_btn.setProperty("class", "success")
-        set_button_icon(export_fasta_btn, "download", 14, "#FFFFFF")
+        export_fasta_btn.setProperty("class", "secondary")
+        set_button_icon(export_fasta_btn, "download", 14)
         export_fasta_btn.clicked.connect(self.export_fasta)
         et.addWidget(export_fasta_btn)
 
@@ -517,6 +518,7 @@ class ClusteringPage(QWidget):
         self.progress_bar.hide()
         self.status_label.setText(f"Clustering complete! ({elapsed:.1f}s)")
         self.results_tabs.show()
+        self.splitter.setSizes([260, 620])
 
     def on_clustering_error(self, error_msg):
         QMessageBox.critical(self, "Clustering Error", f"An error occurred:\n\n{error_msg}")
@@ -543,7 +545,7 @@ class ClusteringPage(QWidget):
             self.chart_label.setText(f"Chart generation failed: {result}")
             self.maximize_chart_button.setEnabled(False)
 
-        table_data = get_cluster_table_data(stats, max_rows=1000)
+        table_data = get_cluster_table_data(stats, max_rows=None)
         self.clusters_table.setRowCount(len(table_data))
         for row, (cluster_id, rep_id, size, members) in enumerate(table_data):
             self.clusters_table.setItem(row, 0, QTableWidgetItem(str(cluster_id)))

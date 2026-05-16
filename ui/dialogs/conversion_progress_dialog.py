@@ -3,6 +3,8 @@ from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QProgressBar, QPushBut
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
+from ui.theme import get_theme
+
 
 class ConversionProgressDialog(QDialog):
     """Dialog showing database conversion progress"""
@@ -30,7 +32,7 @@ class ConversionProgressDialog(QDialog):
         title_font.setPointSize(12)
         title_font.setBold(True)
         title_label.setFont(title_font)
-        title_label.setStyleSheet("color: #2c3e50;")
+        title_label.setProperty("class", "heading")
         
         # Info label
         info_label = QLabel(
@@ -39,11 +41,11 @@ class ConversionProgressDialog(QDialog):
             "2. Convert to MMseqs2 format\n"
             "3. Save the converted database"
         )
-        info_label.setStyleSheet("color: #7f8c8d; font-size: 10px;")
+        info_label.setProperty("class", "muted")
         
         # Status label
         self.status_label = QLabel("Initializing...")
-        self.status_label.setStyleSheet("color: #34495e; font-weight: bold;")
+        self.status_label.setStyleSheet(self._status_style("text_secondary"))
         self.status_label.setWordWrap(True)
         
         # Progress bar
@@ -51,88 +53,27 @@ class ConversionProgressDialog(QDialog):
         self.progress_bar.setMinimum(0)
         self.progress_bar.setMaximum(100)
         self.progress_bar.setValue(0)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                border: 2px solid #bdc3c7;
-                border-radius: 5px;
-                text-align: center;
-                font-weight: bold;
-            }
-            QProgressBar::chunk {
-                background-color: #3498db;
-                border-radius: 3px;
-            }
-        """)
         
         # Details text (hidden by default)
         self.details_text = QTextEdit()
         self.details_text.setReadOnly(True)
         self.details_text.setMaximumHeight(100)
         self.details_text.setVisible(False)
-        self.details_text.setStyleSheet("""
-            QTextEdit {
-                background-color: #f8f9fa;
-                border: 1px solid #dee2e6;
-                border-radius: 3px;
-                padding: 5px;
-                font-family: Consolas, monospace;
-                font-size: 9px;
-            }
-        """)
         
         # Buttons
         button_layout = QVBoxLayout()
         
         self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #e74c3c;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #c0392b;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
+        self.cancel_button.setProperty("class", "danger")
         self.cancel_button.clicked.connect(self.on_cancel_clicked)
         
         self.close_button = QPushButton("Close")
-        self.close_button.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 8px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-        """)
+        self.close_button.setProperty("class", "secondary")
         self.close_button.clicked.connect(self.accept)
         self.close_button.setVisible(False)
         
         self.show_details_button = QPushButton("Show Details")
-        self.show_details_button.setStyleSheet("""
-            QPushButton {
-                background-color: #3498db;
-                color: white;
-                border: none;
-                border-radius: 5px;
-                padding: 5px 10px;
-                font-size: 10px;
-            }
-            QPushButton:hover {
-                background-color: #2980b9;
-            }
-        """)
+        self.show_details_button.setProperty("class", "secondary")
         self.show_details_button.clicked.connect(self.toggle_details)
         
         button_layout.addWidget(self.show_details_button)
@@ -148,6 +89,9 @@ class ConversionProgressDialog(QDialog):
         layout.addLayout(button_layout)
         
         self.setLayout(layout)
+
+    def _status_style(self, color_key):
+        return f"color: {get_theme().get(color_key)}; font-weight: bold;"
     
     def set_worker(self, worker):
         """Set the conversion worker and connect signals
@@ -183,7 +127,7 @@ class ConversionProgressDialog(QDialog):
             mmseqs_path: Path to converted MMseqs2 database
         """
         self.status_label.setText(f"✓ Conversion complete! Database ready to use.")
-        self.status_label.setStyleSheet("color: #27ae60; font-weight: bold;")
+        self.status_label.setStyleSheet(self._status_style("success"))
         self.progress_bar.setValue(100)
         
         self.cancel_button.setVisible(False)
@@ -200,7 +144,7 @@ class ConversionProgressDialog(QDialog):
             error_message: Error message
         """
         self.status_label.setText(f"✗ Conversion failed")
-        self.status_label.setStyleSheet("color: #e74c3c; font-weight: bold;")
+        self.status_label.setStyleSheet(self._status_style("error"))
         
         self.cancel_button.setVisible(False)
         self.close_button.setVisible(True)
@@ -237,4 +181,3 @@ class ConversionProgressDialog(QDialog):
             # Ask user if they want to cancel
             self.conversion_worker.cancel()
         event.accept()
-

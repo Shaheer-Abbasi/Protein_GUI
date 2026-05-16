@@ -29,7 +29,7 @@ class SearchableComboBox(QComboBox):
         """Add item with optional data"""
         try:
             self.all_items.append(text)
-            if data:
+            if data is not None:
                 self.all_data[text] = data
             super().addItem(text)
         except Exception as e:

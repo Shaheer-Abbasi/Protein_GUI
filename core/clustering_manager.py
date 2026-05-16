@@ -93,13 +93,13 @@ def export_clustering_tsv(stats, output_path):
         raise Exception(f"Error exporting TSV: {str(e)}")
 
 
-def get_cluster_table_data(stats, max_rows=1000):
+def get_cluster_table_data(stats, max_rows=None):
     """
     Generate table data for display in UI.
     
     Args:
         stats: Statistics dictionary from parse_clustering_results
-        max_rows: Maximum number of rows to return
+        max_rows: Maximum rows to return, or ``None`` for no limit
         
     Returns:
         list: List of tuples (cluster_id, rep_id, cluster_size, members_preview)
@@ -122,7 +122,7 @@ def get_cluster_table_data(stats, max_rows=1000):
         
         table_data.append((cluster_idx, rep_id, cluster_size, members_preview))
         
-        if len(table_data) >= max_rows:
+        if max_rows is not None and len(table_data) >= max_rows:
             break
     
     return table_data
@@ -144,11 +144,7 @@ def validate_fasta_file(fasta_path):
         
         file_size = os.path.getsize(fasta_path)
         file_size_mb = file_size / (1024 * 1024)
-        
-        # Check file size limit (500MB)
-        if file_size_mb > 500:
-            return False, f"File too large ({file_size_mb:.1f} MB). Maximum size is 500 MB.", 0, file_size_mb
-        
+
         # Quick validation: check for FASTA format
         sequence_count = 0
         has_sequence = False

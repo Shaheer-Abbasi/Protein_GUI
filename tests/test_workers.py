@@ -98,6 +98,15 @@ class TestSequenceAlignmentPrep:
         valid, msg, count = SequenceAlignmentPrep.validate_fasta_for_alignment("/no/file")
         assert valid is False
 
+    def test_validate_fasta_optional_max_cap(self, sample_fasta_file):
+        """Explicit max_sequences still rejects when count exceeds cap."""
+        valid, msg, count = SequenceAlignmentPrep.validate_fasta_for_alignment(
+            sample_fasta_file, max_sequences=1
+        )
+        assert valid is False
+        assert count == 2
+        assert "Too many" in msg
+
 
 # ── MMseqsWorker sensitivity mapping ─────────────────────────────────
 

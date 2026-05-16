@@ -141,13 +141,24 @@ class HomePage(QWidget):
             ("blastn",         "BLASTN Search",      "Search nucleotide sequences against NCBI databases for DNA/RNA homology",            "search"),
             ("clustering",     "MMseqs2 Clustering", "Cluster protein sequences by similarity to group related sequences",                 "grid"),
             ("alignment",      "Sequence Alignment", "Multiple sequence alignment (Clustal Omega, MAFFT, MUSCLE, or FAMSA) with MSA viewer",        "bar-chart-2"),
+            ("phylo",          "Phylogenetic Analysis", "Hierarchical clustering on pairwise identity; interactive dendrogram and reference-branch extraction", "layers"),
             ("motif_search",   "Motif Search",       "Find glycosylation motifs in protein sequences with visualisation",                  "filter"),
+            ("structure",      "Structural Mapping", "Color residues by IC/sector and view structure from RCSB", "package"),
             ("database_downloads","Database Downloads","Download and manage protein databases for BLAST and MMseqs2 searches",             "database"),
         ]
 
+        _accent_key = {
+            "protein_search": "blast",
+            "blastn": "blastn",
+            "clustering": "clustering",
+            "alignment": "alignment",
+            "phylo": "phylo",
+            "motif_search": "motif",
+            "structure": "structure",
+            "database_downloads": "database",
+        }
         for idx, (sid, title_text, desc, icon) in enumerate(services):
-            accent = PAGE_ACCENTS.get(sid.replace("_downloads", "").replace("_search", ""),
-                                      t.get("accent"))
+            accent = PAGE_ACCENTS.get(_accent_key.get(sid, sid), t.get("accent"))
             card = ServiceCard(title_text, desc, accent, icon)
             card.clicked.connect(lambda _=False, s=sid: self.service_selected.emit(s))
             grid.addWidget(card, idx // 2, idx % 2)

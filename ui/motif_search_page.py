@@ -137,7 +137,7 @@ class MatplotlibCanvas(FigureCanvas if MATPLOTLIB_AVAILABLE else QWidget):
 
     def __init__(self, parent=None):
         if MATPLOTLIB_AVAILABLE:
-            self.figure = Figure(figsize=(12, 8), dpi=100)
+            self.figure = Figure(figsize=(12, 7), dpi=100)
             t = get_theme()
             bg = t.get("bg_primary")
             self.figure.set_facecolor(bg)
@@ -207,7 +207,14 @@ class MatplotlibCanvas(FigureCanvas if MATPLOTLIB_AVAILABLE else QWidget):
                     ax.scatter(motif_pos, seq_idx + 1, c=color, s=15,
                                edgecolors=color, alpha=0.7)
 
-        self.figure.tight_layout(pad=2.0, h_pad=3.0, w_pad=2.0)
+        self.figure.subplots_adjust(
+            left=0.08,
+            right=0.98,
+            bottom=0.09,
+            top=0.9,
+            wspace=0.28,
+            hspace=0.55,
+        )
         self.draw()
 
     def clear_plot(self):
@@ -330,6 +337,7 @@ class MotifSearchPage(QWidget):
 
         # ── Bottom: results tabs ─────────────────────────────────
         self.results_tabs = QTabWidget()
+        self.results_tabs.setObjectName("resultsTabs")
         self.results_tabs.hide()
 
         # Tab 1: Plots
@@ -373,8 +381,8 @@ class MotifSearchPage(QWidget):
         el.addWidget(QLabel("Export the search results:"))
 
         export_csv_btn = QPushButton("Export as CSV")
-        export_csv_btn.setProperty("class", "success")
-        set_button_icon(export_csv_btn, "download", 14, "#FFFFFF")
+        export_csv_btn.setProperty("class", "secondary")
+        set_button_icon(export_csv_btn, "download", 14)
         export_csv_btn.clicked.connect(self.export_csv)
         el.addWidget(export_csv_btn)
 
@@ -515,6 +523,7 @@ class MotifSearchPage(QWidget):
             f"in {results['total_sequences']} sequences."
         )
         self.results_tabs.show()
+        self.splitter.setSizes([250, 650])
 
     def _populate_results_table(self, results: dict):
         rows = []

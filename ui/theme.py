@@ -89,14 +89,14 @@ def _make_arrow_icon(direction: str, color: str, size: int = 10) -> str:
 
 def _platform_ui_font():
     if sys.platform == "darwin":
-        return '"SF Pro Display", "SF Pro Text", "Helvetica Neue", Helvetica, Arial, sans-serif'
-    return '"Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif'
+        return '"Helvetica Neue", Helvetica, Arial'
+    return '"Segoe UI", Roboto, "Helvetica Neue", Arial'
 
 
 def _platform_mono_font():
     if sys.platform == "darwin":
-        return '"JetBrains Mono", Menlo, "SF Mono", Monaco, monospace'
-    return '"JetBrains Mono", Consolas, "Courier New", monospace'
+        return 'Menlo, "SF Mono", Monaco'
+    return 'Consolas, "Courier New"'
 
 
 LIGHT = {
@@ -168,9 +168,11 @@ PAGE_ACCENTS = {
     "mmseqs":      "#9B59B6",
     "clustering":  "#E67E22",
     "alignment":   "#1ABC9C",
+    "phylo":       "#16A085",
     "motif":       "#E91E63",
     "tools":       "#607D8B",
     "database":    "#00897B",
+    "structure":   "#9B59B6",
 }
 
 
@@ -239,11 +241,19 @@ class ThemeManager(QObject):
         }}
 
         QWidget {{
-            background-color: transparent;
+            background-color: {p['bg_primary']};
             color: {p['text_primary']};
         }}
 
+        QWidget[class="card"], QGroupBox, QFrame[class="card"] {{
+            background-color: {p['bg_card']};
+        }}
+
         /* ── Tab Widget ─────────────────────────────────── */
+        QTabWidget {{
+            background-color: {p['bg_primary']};
+        }}
+
         QTabWidget::pane {{
             border: none;
             background-color: {p['bg_primary']};
@@ -251,6 +261,14 @@ class ThemeManager(QObject):
 
         QTabBar {{
             background-color: {p['bg_secondary']};
+        }}
+
+        QTabWidget::tab-bar {{
+            background-color: {p['bg_secondary']};
+        }}
+
+        QStackedWidget, QScrollArea, QScrollArea > QWidget > QWidget {{
+            background-color: {p['bg_primary']};
         }}
 
         QTabBar::tab {{
@@ -272,6 +290,20 @@ class ThemeManager(QObject):
         QTabBar::tab:hover:!selected {{
             color: {p['text_primary']};
             background-color: {p['bg_hover']};
+        }}
+
+        QTabWidget#resultsTabs::pane {{
+            border-top: 1px solid {p['border_light']};
+        }}
+
+        QTabWidget#resultsTabs QTabBar::tab {{
+            padding: 7px 14px;
+            font-size: 11px;
+            border-bottom: 2px solid transparent;
+        }}
+
+        QTabWidget#resultsTabs QTabBar::tab:selected {{
+            border-bottom: 2px solid {p['accent']};
         }}
 
         /* ── Group Box ──────────────────────────────────── */
@@ -479,16 +511,43 @@ class ThemeManager(QObject):
         }}
 
         /* ── Radio / Check ──────────────────────────────── */
-        QRadioButton, QCheckBox {{
+        /* Radios: pill-style card so they don't pick up sharp QWidget(bg_primary) rects
+           on top of QGroupBox (bg_card); radius matches QPushButton / QGroupBox. */
+        QRadioButton {{
             color: {p['text_primary']};
             spacing: 8px;
-            padding: 4px 2px;
             font-size: 13px;
+            background-color: {p['bg_secondary']};
+            /* 2px border in both states so checked/unchecked don't steal inner width */
+            border: 2px solid {p['border_light']};
+            border-radius: 8px;
+            padding: 8px 20px;
+            margin: 0 8px 6px 0;
+        }}
+
+        QRadioButton:hover {{
+            background-color: {p['bg_hover']};
+            border-color: {p['border']};
         }}
 
         QRadioButton:checked {{
             color: {p['accent']};
             font-weight: 600;
+            background-color: {p['bg_card']};
+            border: 2px solid {p['accent']};
+            padding: 8px 20px;
+        }}
+
+        QRadioButton:checked:hover {{
+            border-color: {p['accent_hover']};
+        }}
+
+        QCheckBox {{
+            color: {p['text_primary']};
+            spacing: 8px;
+            padding: 4px 2px;
+            font-size: 13px;
+            background-color: transparent;
         }}
 
         QCheckBox:checked {{
@@ -659,6 +718,15 @@ class ThemeManager(QObject):
             font-weight: 600;
             color: {p['text_secondary']};
             padding: 4px 0;
+        }}
+
+        QLabel[class="valueBadge"] {{
+            background-color: {p['bg_input']};
+            border: 1px solid {p['border']};
+            border-radius: 5px;
+            color: {p['text_primary']};
+            font-weight: 600;
+            padding: 5px 10px;
         }}
 
         QLabel[class="title"] {{

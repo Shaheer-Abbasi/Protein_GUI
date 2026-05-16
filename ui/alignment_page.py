@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+from pathlib import Path
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QFileDialog, QLineEdit, QComboBox, QGroupBox, QTextEdit,
@@ -39,6 +40,7 @@ class AlignmentPage(QWidget):
     """Sequence alignment with Clustal Omega, MAFFT, MUSCLE, or FAMSA."""
 
     back_requested = pyqtSignal()
+    navigate_to_phylo = pyqtSignal(str)  # aligned FASTA text
 
     def __init__(self):
         super().__init__()
@@ -176,7 +178,7 @@ class AlignmentPage(QWidget):
         iter_row = QHBoxLayout()
         iter_row.addWidget(QLabel("Iterations:"))
         self.iter_spin = QSpinBox()
-        self.iter_spin.setRange(0, 5)
+        self.iter_spin.setRange(0, 9999)
         self.iter_spin.setValue(0)
         self.iter_spin.setToolTip("Number of combined iterations (0 = auto)")
         iter_row.addWidget(self.iter_spin)
@@ -278,8 +280,8 @@ class AlignmentPage(QWidget):
 
         viewer_bar = QHBoxLayout()
         self.open_viewer_btn = QPushButton("Open Alignment Viewer")
-        self.open_viewer_btn.setProperty("class", "success")
-        set_button_icon(self.open_viewer_btn, "eye", 16, "#FFFFFF")
+        self.open_viewer_btn.setProperty("class", "secondary")
+        set_button_icon(self.open_viewer_btn, "eye", 16)
         self.open_viewer_btn.setToolTip(
             "Open the interactive MSA viewer in a separate window (XML color schemes, zoom, export)."
         )
@@ -292,6 +294,7 @@ class AlignmentPage(QWidget):
         rp_layout.addLayout(viewer_bar)
 
         self.results_tabs = QTabWidget()
+        self.results_tabs.setObjectName("resultsTabs")
         self.results_tabs.hide()
         rp_layout.addWidget(self.results_tabs, 1)
 
@@ -474,16 +477,23 @@ class AlignmentPage(QWidget):
         el.addWidget(QLabel("Export the alignment in various formats:"))
 
         export_fasta_btn = QPushButton("Export as FASTA")
-        export_fasta_btn.setProperty("class", "success")
-        set_button_icon(export_fasta_btn, "download", 14, "#FFFFFF")
+        export_fasta_btn.setProperty("class", "secondary")
+        set_button_icon(export_fasta_btn, "download", 14)
         export_fasta_btn.clicked.connect(lambda: self._export_alignment('fasta'))
         el.addWidget(export_fasta_btn)
 
         export_clustal_btn = QPushButton("Export as Clustal")
-        export_clustal_btn.setProperty("class", "success")
-        set_button_icon(export_clustal_btn, "download", 14, "#FFFFFF")
+        export_clustal_btn.setProperty("class", "secondary")
+        set_button_icon(export_clustal_btn, "download", 14)
         export_clustal_btn.clicked.connect(lambda: self._export_alignment('clustal'))
         el.addWidget(export_clustal_btn)
+
+        el.addStretch()
+        phylo_btn = QPushButton("Send to Phylogenetic Analysis")
+        phylo_btn.setProperty("class", "secondary")
+        set_button_icon(phylo_btn, "layers", 14)
+        phylo_btn.clicked.connect(self._send_alignment_to_phylo)
+        el.addWidget(phylo_btn)
 
         el.addStretch()
         self.results_tabs.addTab(export_tab, feather_icon("download", 16), "Export")
@@ -811,6 +821,7 @@ class AlignmentPage(QWidget):
         self.status_label.setText("Alignment complete!")
         self._results_panel.show()
         self.results_tabs.show()
+        self.splitter.setSizes([220, 620])
 
         self._refresh_pysca_status()
 
@@ -833,7 +844,23 @@ class AlignmentPage(QWidget):
         self.progress_bar.hide()
         self.status_label.setText("Error occurred")
 
-    # ── Export ───────────────────────────────────────────────────
+    def _send_alignment_to_phylo(self):
+        if not self.aligned_content:
+            QMessageBox.warning(
+                self, "No Alignment",
+                "Run an alignment first, then send it to Phylogenetic Analysis.",
+            )
+            return
+        fmt = self._alignment_output_format or self.format_combo.currentData()
+        if fmt != "fasta":
+            QMessageBox.information(
+                self, "Phylogenetic Analysis",
+                "This action requires aligned FASTA output.\n\n"
+                "Re-run the alignment with output format “FASTA (aligned)”.",
+            )
+            return
+        self.navigate_to_phylo.emit(self.aligned_content)
+
     def _export_alignment(self, format_type):
         if not self.aligned_content:
             QMessageBox.warning(self, "No Alignment", "No alignment available to export.")
@@ -1048,6 +1075,27 @@ class AlignmentPage(QWidget):
         if not dlg.ensure_loaded(self._pysca_db_path):
             return
         dlg.show_raised()
+
+    def load_external_pysca_db(self, path: str, *, show_dialog: bool = True) -> bool:
+        """Attach an on-disk .db to this page and optionally open the results dialog."""
+        path_str = str(Path(path).resolve())
+        if not os.path.isfile(path_str):
+            QMessageBox.warning(self, "pySCA", "File not found.")
+            return False
+        self._pysca_db_path = path_str
+        dlg = self._ensure_pysca_results_dialog()
+        if not dlg.load_db_path(path_str):
+            return False
+        self.pysca_save_db_btn.setEnabled(True)
+        self.pysca_export_csv_btn.setEnabled(True)
+        self.pysca_open_folder_btn.setEnabled(False)
+        self.pysca_results_strip.set_status(
+            'External .db loaded — use "Open results window" for plots and structure colouring.'
+        )
+        self.pysca_results_strip.setVisible(True)
+        if show_dialog:
+            dlg.show_raised()
+        return True
 
     def _on_pysca_run_log(self, msg):
         self.pysca_log.append(msg)

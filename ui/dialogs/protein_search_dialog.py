@@ -111,7 +111,7 @@ class ProteinSearchDialog(QDialog):
         examples_label = QLabel(
             '<i>Examples: "Insulin", "Hemoglobin", "P12345", "Q8W3K0"</i>'
         )
-        examples_label.setStyleSheet("color: #666;")
+        examples_label.setProperty("class", "muted")
         search_layout.addWidget(examples_label)
         
         search_group.setLayout(search_layout)
@@ -127,7 +127,7 @@ class ProteinSearchDialog(QDialog):
         
         # Result count label
         self.result_count_label = QLabel("No search performed yet")
-        self.result_count_label.setStyleSheet("color: #666; font-style: italic;")
+        self.result_count_label.setProperty("class", "muted")
         results_layout.addWidget(self.result_count_label)
         
         results_group.setLayout(results_layout)
@@ -154,24 +154,12 @@ class ProteinSearchDialog(QDialog):
         button_layout.addStretch()
         
         self.load_button = QPushButton("Load Sequence")
+        self.load_button.setProperty("class", "success")
         self.load_button.clicked.connect(self._load_sequence)
         self.load_button.setEnabled(False)
-        self.load_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2ecc71;
-                color: white;
-                padding: 8px 16px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #27ae60;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-            }
-        """)
         
         self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.setProperty("class", "secondary")
         self.cancel_button.clicked.connect(self.reject)
         
         button_layout.addWidget(self.load_button)
@@ -331,4 +319,3 @@ class ProteinSearchDialog(QDialog):
         
         self.sequence_selected.emit(sequence, metadata)
         self.accept()
-

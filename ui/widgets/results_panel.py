@@ -310,12 +310,14 @@ class SearchResultsPanel(QWidget):
 
         # action buttons
         self._export_tsv = QPushButton("Export TSV")
-        set_button_icon(self._export_tsv, "download", 14, "#FFFFFF")
+        self._export_tsv.setProperty("class", "secondary")
+        set_button_icon(self._export_tsv, "download", 14)
         self._export_tsv.clicked.connect(lambda: self.export_requested.emit("tsv"))
         tb.addWidget(self._export_tsv)
 
         self._export_csv = QPushButton("Export CSV")
-        set_button_icon(self._export_csv, "download", 14, "#FFFFFF")
+        self._export_csv.setProperty("class", "secondary")
+        set_button_icon(self._export_csv, "download", 14)
         self._export_csv.clicked.connect(lambda: self.export_requested.emit("csv"))
         tb.addWidget(self._export_csv)
 

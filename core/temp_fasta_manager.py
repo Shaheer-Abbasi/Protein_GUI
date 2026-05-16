@@ -52,6 +52,23 @@ class TemporaryFastaManager:
         self.temp_files.append(path)
         return path
     
+    def write_temp_fasta_string(self, fasta_content: str, prefix: str = "phylo_") -> str:
+        """
+        Write FASTA text to a temp file and register it for cleanup.
+
+        Returns:
+            Path to the created file
+        """
+        fd, path = tempfile.mkstemp(
+            suffix=".fasta",
+            prefix=prefix,
+            text=True,
+        )
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(fasta_content)
+        self.temp_files.append(path)
+        return path
+
     def cleanup_all(self):
         """Cleanup all temporary files"""
         for path in self.temp_files:

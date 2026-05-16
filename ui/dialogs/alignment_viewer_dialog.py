@@ -92,14 +92,17 @@ class AlignmentViewerDialog(QDialog):
         toolbar.addStretch()
 
         self.export_png_btn = QPushButton("Export PNG…")
+        self.export_png_btn.setProperty("class", "secondary")
         self.export_png_btn.clicked.connect(self._export_png)
         toolbar.addWidget(self.export_png_btn)
 
         self.export_fasta_btn = QPushButton("Export FASTA…")
+        self.export_fasta_btn.setProperty("class", "secondary")
         self.export_fasta_btn.clicked.connect(self._export_fasta)
         toolbar.addWidget(self.export_fasta_btn)
 
         self.close_btn = QPushButton("Close")
+        self.close_btn.setProperty("class", "secondary")
         self.close_btn.clicked.connect(self.hide)
         toolbar.addWidget(self.close_btn)
 
