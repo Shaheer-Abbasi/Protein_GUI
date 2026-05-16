@@ -70,6 +70,8 @@ class ToolRuntime:
             return "famsa-gpu"
         if tool_id == "twilight":
             return "twilight"
+        if tool_id == "learnmsa":
+            return "learnMSA"
         return None
 
     def _resolve_managed(self, tool_id: str, spec: ToolSpec) -> ToolResolution | None:

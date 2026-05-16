@@ -27,8 +27,8 @@ from benchmarks.runner import (
 
 DEFAULT_TIER_SIZES = (2000, 100000, 500000)
 
-ALL_TOOLS = ("clustalo", "mafft", "muscle", "famsa", "famsa_gpu", "twilight")
-ULTRA_TOOLS = ("famsa", "famsa_gpu", "twilight")
+ALL_TOOLS = ("clustalo", "mafft", "muscle", "famsa", "famsa_gpu", "twilight", "learnmsa")
+ULTRA_TOOLS = ("famsa", "famsa_gpu", "twilight", "learnmsa")
 
 ALL_TOOLS_THRESHOLD = 10_000
 
@@ -72,6 +72,13 @@ def main() -> None:
         help=f"Comma-separated tier sizes (default {','.join(map(str, DEFAULT_TIER_SIZES))})",
     )
     ap.add_argument("--threads", default="1,4,8", help="Comma-separated thread counts.")
+    ap.add_argument(
+        "--tools",
+        help=(
+            "Optional comma-separated tools to run on every tier "
+            f"(default: all for <=10k, ultra only for larger; choices: {','.join(ALIGNMENT_TOOL_IDS)})"
+        ),
+    )
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--warmup", type=int, default=1)
     ap.add_argument(
@@ -89,6 +96,12 @@ def main() -> None:
 
     sizes = parse_tiers(args.tiers)
     thread_list = [int(x.strip()) for x in args.threads.split(",") if x.strip()]
+    requested_tools = None
+    if args.tools:
+        requested_tools = tuple(t.strip() for t in args.tools.split(",") if t.strip())
+        unknown = sorted(set(requested_tools) - set(ALIGNMENT_TOOL_IDS))
+        if unknown:
+            raise SystemExit(f"Unknown --tools value(s): {', '.join(unknown)}")
 
     work_dir = os.path.abspath(args.work_dir)
     out_dir = os.path.abspath(args.out_dir)
@@ -118,7 +131,7 @@ def main() -> None:
         label = f"tier{ti}_n{n}"
         dst = os.path.join(work_dir, f"{label}.fasta")
         wrote = subset_fasta(src, n, dst, seed=args.seed)
-        tools = tools_for_size(n)
+        tools = requested_tools if requested_tools is not None else tools_for_size(n)
         ladder.append((ti, dst, wrote, tools))
         print(f"[prep] tier {ti} seq_count={wrote} -> {dst} tools={tools}")
 

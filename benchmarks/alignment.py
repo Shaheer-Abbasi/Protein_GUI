@@ -57,6 +57,12 @@ def alignment_timeout(tool_id: str, seq_count: int) -> float:
         return float(max(base, seq_count * classical_mult))
     if tool_id == "twilight":
         return float(max(base, seq_count * 2) * 2)
+    if tool_id == "learnmsa":
+        if seq_count <= 5_000:
+            return float(max(base, seq_count * 4))
+        if seq_count <= 100_000:
+            return 172_800.0
+        return 691_200.0
     # clustalo, muscle, fallback
     if tool_id in ("clustalo", "muscle"):
         mult = 5 if seq_count >= 10_000 else 2
@@ -283,6 +289,20 @@ def build_argv_twilight(
     return argv_for_resolution(resolution, cmd_parts)
 
 
+def build_argv_learnmsa(
+    rt,
+    resolution,
+    input_native: str,
+    output_native: str,
+) -> list[str]:
+    inp = rt.prepare_path(resolution, input_native)
+    outp = rt.prepare_path(resolution, output_native)
+    cmd_parts = ["-i", inp, "-o", outp]
+    if cuda_available():
+        cmd_parts.extend(["-d", "0"])
+    return argv_for_resolution(resolution, cmd_parts)
+
+
 def run_one_alignment(
     tool_id: str,
     *,
@@ -320,6 +340,8 @@ def run_one_alignment(
             if tree_path
             else []
         )
+    elif tool_id == "learnmsa":
+        argv = build_argv_learnmsa(rt, resolution, input_path, out_native)
     else:
         raise ValueError(f"Unsupported alignment tool: {tool_id}")
 
@@ -408,7 +430,7 @@ def main() -> None:
     ap.add_argument("--sizes", default="50,200,full", help="Comma-separated ints or full.")
     ap.add_argument(
         "--tools",
-        default="clustalo,mafft,muscle,famsa,famsa_gpu,twilight",
+        default="clustalo,mafft,muscle,famsa,famsa_gpu,twilight,learnmsa",
         help="Comma-separated tool ids.",
     )
     ap.add_argument("--threads", default="1,4,8", help="Comma-separated thread counts.")

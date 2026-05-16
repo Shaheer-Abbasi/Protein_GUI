@@ -128,6 +128,16 @@ TOOLS: Dict[str, ToolSpec] = {
         version_args=("--version",),
         managed_platforms=(),
     ),
+    "learnmsa": ToolSpec(
+        id="learnmsa",
+        display_name="learnMSA",
+        package_name="learnmsa",
+        channels=("bioconda",),
+        executables=("learnMSA", "learnmsa"),
+        feature_labels=("alignment", "alignment_learnmsa"),
+        version_args=("-h",),
+        managed_platforms=(),
+    ),
 }
 
 
@@ -144,13 +154,22 @@ FEATURE_TOOLS: Dict[str, Tuple[str, ...]] = {
     "alignment_famsa": ("famsa",),
     "alignment_famsa_gpu": ("famsa_gpu",),
     "alignment_twilight": ("twilight",),
+    "alignment_learnmsa": ("learnmsa",),
     "protein_diamond": ("diamond",),
     "clustering": ("mmseqs",),
     "database_conversion": ("blastdbcmd", "mmseqs"),
 }
 
 
-ALIGNMENT_TOOL_IDS: Tuple[str, ...] = ("clustalo", "mafft", "muscle", "famsa", "famsa_gpu", "twilight")
+ALIGNMENT_TOOL_IDS: Tuple[str, ...] = (
+    "clustalo",
+    "mafft",
+    "muscle",
+    "famsa",
+    "famsa_gpu",
+    "twilight",
+    "learnmsa",
+)
 
 
 def alignment_feature_id_for_tool(tool_id: str) -> str:
@@ -209,6 +228,7 @@ def get_windows_backend_policy() -> Dict[str, str]:
         "diamond": "wsl",
         "famsa_gpu": "wsl",
         "twilight": "wsl",
+        "learnmsa": "wsl",
     }
 
 
