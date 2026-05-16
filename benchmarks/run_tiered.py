@@ -1,11 +1,10 @@
-"""Run four-tier alignment benchmarks (baseline / stress / ultra / hero)."""
+"""Run tiered alignment benchmarks (default sizes: 2k / 5k / 100k / 500k)."""
 
 from __future__ import annotations
 
 import argparse
 import datetime
 import os
-import sys
 
 from core.array_backend import cuda_available
 from core.tool_registry import ALIGNMENT_TOOL_IDS
@@ -25,7 +24,7 @@ from benchmarks.runner import (
     try_resolve_executable,
 )
 
-DEFAULT_TIER_SIZES = (5000, 100000, 500000)
+DEFAULT_TIER_SIZES = (2000, 5000, 100000, 500000)
 
 ALL_TOOLS = ("clustalo", "mafft", "muscle", "famsa", "famsa_gpu", "twilight")
 ULTRA_TOOLS = ("famsa", "famsa_gpu", "twilight")
@@ -51,7 +50,7 @@ def tools_for_size(n: int) -> tuple[str, ...]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(
-        description="Tiered alignment benchmark: 2k/10k all tools; 100k/500k ultra-scale only.",
+        description="Tiered alignment benchmark: sizes ≤10k use all tools; larger tiers use ultra-scale tools only.",
     )
     ap.add_argument(
         "--source",
@@ -61,7 +60,7 @@ def main() -> None:
     ap.add_argument(
         "--tiers",
         default=",".join(str(x) for x in DEFAULT_TIER_SIZES),
-        help=f"Four tier sizes, comma-separated (default {','.join(map(str, DEFAULT_TIER_SIZES))})",
+        help=f"Comma-separated tier sizes (default {','.join(map(str, DEFAULT_TIER_SIZES))})",
     )
     ap.add_argument("--threads", default="1,4,8", help="Comma-separated thread counts.")
     ap.add_argument("--repeats", type=int, default=3)

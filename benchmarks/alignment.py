@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import tempfile
 import uuid
 from typing import Any
@@ -19,6 +20,7 @@ from core.tool_runtime import get_tool_runtime
 from benchmarks.datasets import prepare_size_ladder
 from benchmarks.quality import compute_quality
 from benchmarks.runner import (
+    TimedRunResult,
     argv_for_resolution,
     collect_alignment_tool_versions,
     collect_system_metadata,
@@ -188,21 +190,33 @@ def _materialize_twilight_safe_fasta(original_path: str) -> str:
     return safe_path
 
 
-def _ensure_guide_tree(input_fasta: str, threads: int) -> str | None:
-    """Build a FAMSA NJ guide tree for TWILIGHT (cached per input file)."""
-    import shutil as _sh
-    import subprocess as _sp
+def _ensure_guide_tree(input_fasta: str, threads: int) -> tuple[str | None, str]:
+    """Build FAMSA NJ guide tree for TWILIGHT. Returns ``(path, \"\")`` or ``(None, error)``.
+
+    Drops cached ``*.twilight_guide.nwk`` if older than *input_fasta* so labels stay in sync.
+    """
     tree_path = input_fasta + ".twilight_guide.nwk"
-    if os.path.isfile(tree_path) and os.path.getsize(tree_path) > 0:
-        return tree_path
-    famsa_bin = _sh.which("famsa")
-    if not famsa_bin:
-        return None
+    if (
+        os.path.isfile(tree_path)
+        and os.path.getsize(tree_path) > 0
+        and os.path.isfile(input_fasta)
+        and os.path.getmtime(tree_path) >= os.path.getmtime(input_fasta)
+    ):
+        return tree_path, ""
+
     try:
-        # FAMSA 2.4+: two positional args after -gt_export: input FASTA, Newick output.
-        _sp.run(
+        os.unlink(tree_path)
+    except OSError:
+        pass
+
+    _res, famsa_exe = try_resolve_executable("famsa")
+    if not famsa_exe:
+        return None, "famsa not resolved (needed for TWILIGHT guide tree)"
+
+    try:
+        proc = subprocess.run(
             [
-                famsa_bin,
+                famsa_exe,
                 "-t",
                 str(threads),
                 "-gt",
@@ -215,9 +229,17 @@ def _ensure_guide_tree(input_fasta: str, threads: int) -> str | None:
             timeout=600,
             check=False,
         )
-    except Exception:
-        return None
-    return tree_path if os.path.isfile(tree_path) else None
+    except subprocess.TimeoutExpired:
+        return None, "famsa -gt_export timed out building guide tree"
+    except Exception as exc:
+        return None, f"famsa -gt_export error: {exc}"
+
+    if proc.returncode != 0 or not (os.path.isfile(tree_path) and os.path.getsize(tree_path) > 0):
+        err = (proc.stderr or proc.stdout or b"").decode("utf-8", errors="replace").strip()
+        hint = err[:800] if err else "(no stderr)"
+        return None, f"famsa -gt_export failed (exit {proc.returncode}): {hint}"
+
+    return tree_path, ""
 
 
 def build_argv_twilight(
@@ -260,6 +282,7 @@ def run_one_alignment(
 
     argv: list[str]
     stdout_capture: str | None = None
+    tree_err = ""
 
     if tool_id == "clustalo":
         argv = build_argv_clustalo(rt, resolution, input_path, out_native, threads)
@@ -272,17 +295,30 @@ def run_one_alignment(
         argv = build_argv_famsa(rt, resolution, input_path, out_native, threads)
     elif tool_id == "twilight":
         safe_in = _materialize_twilight_safe_fasta(input_path)
-        tree = _ensure_guide_tree(safe_in, threads)
-        argv = build_argv_twilight(rt, resolution, safe_in, out_native, threads, tree)
+        tree_path, tree_err = _ensure_guide_tree(safe_in, threads)
+        argv = (
+            build_argv_twilight(rt, resolution, safe_in, out_native, threads, tree_path)
+            if tree_path
+            else []
+        )
     else:
         raise ValueError(f"Unsupported alignment tool: {tool_id}")
 
     timeout = alignment_timeout(tool_id, seq_count)
-    result = timed_run(
-        argv,
-        timeout=timeout,
-        stdout_path=stdout_capture,
-    )
+    if tool_id == "twilight" and not argv:
+        result = TimedRunResult(
+            wall_seconds=0.0,
+            peak_rss_mib=None,
+            exit_code=1,
+            stderr_snippet=(tree_err or "twilight: guide tree missing")[:500],
+            timed_out=False,
+        )
+    else:
+        result = timed_run(
+            argv,
+            timeout=timeout,
+            stdout_path=stdout_capture,
+        )
 
     aligned_path: str | None = None
     if tool_id == "mafft" and stdout_capture and os.path.isfile(stdout_capture):

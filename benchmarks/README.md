@@ -6,16 +6,18 @@ Standalone harness under `benchmarks/` that mirrors command-line shapes used by 
 
 Uses the project virtualenv / same requirements as the app (`biopython`, `matplotlib`, `numpy` via SciPy stack). External binaries must be installed or resolved via **Tools** paths (`core.tool_runtime.get_tool_runtime`).
 
-## Tiered alignment (2k / 10k / 100k / 500k)
+## Tiered alignment (defaults: 2k / 5k / 100k / 500k)
 
 Pfam-scale runs use a **single pooled FASTA** (default **ABC transporter Pfam PF00005**, ~millions of UniProt matches) with **reproducible reservoir subsets** (`seed=42`).
 
 | Tier | Default *N* | Tools |
 |------|-------------|--------|
 | 1 | 2,000 | clustalo, mafft, muscle, famsa, famsa_gpu, twilight |
-| 2 | 10,000 | same as tier 1 |
+| 2 | 5,000 | same as tier 1 |
 | 3 | 100,000 | famsa, famsa_gpu, twilight |
 | 4 | 500,000 | famsa, famsa_gpu, twilight |
+
+Sizes **≤ 10,000** sequences run **all** listed tools; larger tiers run **ultra-scale** tools only (`famsa`, `famsa_gpu`, `twilight`). Override sizes with **`--tiers`** (comma-separated list).
 
 ### 1) Download the family (once)
 
@@ -30,7 +32,7 @@ python -m benchmarks.download_datasets --pfam-id PF00005 --out-dir benchmark_dat
 - `--skip-decompress` keeps only the `.gz`
 - **User-Agent**: set in `benchmarks.datasets` (UniProt requests identify the client)
 
-### 2) Run all four tiers (one JSONL)
+### 2) Run all tiers (one JSONL)
 
 ```bash
 python -m benchmarks.run_tiered \
@@ -41,8 +43,8 @@ python -m benchmarks.run_tiered \
   --out-dir benchmark_runs/tiered
 ```
 
-- Writes `benchmark_runs/tiered/alignment.jsonl` — every row includes **`tier`** (`"1"`…`"4"`) plus the usual alignment fields.
-- Default `--tiers` is `2000,10000,100000,500000` (exactly four comma-separated integers).
+- Writes `benchmark_runs/tiered/alignment.jsonl` — every row includes **`tier`** (`"1"`, `"2"`, …) plus the usual alignment fields.
+- Default **`--tiers`** is `2000,5000,100000,500000`; pass any comma-separated list (e.g. `--tiers 100` for a smoke test).
 - **`famsa_gpu`** is skipped when CUDA is unavailable (same as the non-tiered driver).
 - Large alignments (**> 50k sequences**): quality metrics are omitted with `quality_skipped` to avoid huge post-processing cost.
 
