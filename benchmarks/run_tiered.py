@@ -11,6 +11,7 @@ from core.tool_registry import ALIGNMENT_TOOL_IDS
 from core.tool_runtime import get_tool_runtime
 
 from benchmarks.alignment import (
+    TWILIGHT_MAX_CPU_CORES,
     alignment_timeout,
     append_jsonl,
     effective_threads,
@@ -30,6 +31,14 @@ ALL_TOOLS = ("clustalo", "mafft", "muscle", "famsa", "famsa_gpu", "twilight")
 ULTRA_TOOLS = ("famsa", "famsa_gpu", "twilight")
 
 ALL_TOOLS_THRESHOLD = 10_000
+
+
+def _threads_log_suffix(tool_id: str, eff_t: int) -> str:
+    """TWILIGHT caps CPU parallelism (-C); sweep may still request higher *threads*."""
+    if tool_id == "twilight":
+        capped = max(1, min(eff_t, TWILIGHT_MAX_CPU_CORES))
+        return f"threads={eff_t} twilight_-C={capped}"
+    return f"threads={eff_t}"
 
 
 def parse_tiers(spec: str) -> list[int]:
@@ -134,7 +143,7 @@ def main() -> None:
                     timeout_s = alignment_timeout(tool_id, n_seq)
                     print(
                         f"[{ts}] [start] tier={tier_idx} {tool_id} n={n_seq} "
-                        f"threads={eff_t} {phase} timeout={timeout_s:.0f}s",
+                        f"{_threads_log_suffix(tool_id, eff_t)} {phase} timeout={timeout_s:.0f}s",
                         flush=True,
                     )
                     if is_warmup:
@@ -167,7 +176,8 @@ def main() -> None:
                     tag = "OK" if row.get("exit_code") == 0 and not row.get("timed_out") else "FAIL"
                     ts2 = datetime.datetime.now().strftime("%H:%M:%S")
                     print(
-                        f"[{ts2}] [{tag}] tier={tier_idx} {tool_id} n={n_seq} threads={eff_t} "
+                        f"[{ts2}] [{tag}] tier={tier_idx} {tool_id} n={n_seq} "
+                        f"{_threads_log_suffix(tool_id, eff_t)} "
                         f"rep={row['repeat']} time={row['wall_seconds']:.2f}s",
                         flush=True,
                     )

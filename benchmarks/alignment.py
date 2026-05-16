@@ -340,6 +340,8 @@ def run_one_alignment(
         "timed_out": result.timed_out,
         "stderr_snippet": result.stderr_snippet,
     }
+    if tool_id == "twilight":
+        row["twilight_c_threads"] = max(1, min(int(threads), TWILIGHT_MAX_CPU_CORES))
 
     qual: dict[str, Any] = {}
     if (
