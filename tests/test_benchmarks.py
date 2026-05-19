@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from urllib.parse import parse_qs, urlparse
 from pathlib import Path
 
 from Bio import SeqIO
@@ -11,6 +12,7 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 
 from benchmarks import aggregate
+from benchmarks.alignment import build_argv_muscle
 from benchmarks.datasets import count_sequences, subset_fasta, uniprot_pfam_stream_url
 from benchmarks.quality import QualityMetrics, compute_quality
 
@@ -36,8 +38,9 @@ class BenchmarkHelpersTest(unittest.TestCase):
 
     def test_uniprot_pfam_stream_url_encoding(self):
         u = uniprot_pfam_stream_url("PF00005")
-        self.assertIn("compressed=true", u)
-        self.assertIn("(xref", u)
+        qs = parse_qs(urlparse(u).query)
+        self.assertEqual(qs["compressed"], ["true"])
+        self.assertEqual(qs["query"], ["(xref:pfam-PF00005)"])
 
     def test_aggregate_summarize_alignment_tiers(self):
         rows = [
@@ -103,6 +106,27 @@ class BenchmarkHelpersTest(unittest.TestCase):
             empty.write_text("", encoding="utf-8")
             rows = aggregate.read_jsonl(str(empty))
             self.assertEqual(aggregate.summarize_alignment(rows), [])
+
+    def test_muscle_super5_argv(self):
+        class RT:
+            @staticmethod
+            def prepare_path(_resolution, path):
+                return path
+
+        class Resolution:
+            executable = "muscle"
+            backend = "native"
+
+        argv = build_argv_muscle(
+            RT(),
+            Resolution(),
+            "input.fasta",
+            "output.fasta",
+            8,
+            mode="super5",
+        )
+        self.assertIn("-super5", argv)
+        self.assertNotIn("-align", argv)
 
 
 if __name__ == "__main__":

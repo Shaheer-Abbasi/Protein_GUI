@@ -7,6 +7,7 @@ import json
 import os
 import subprocess
 import tempfile
+import time
 import uuid
 from typing import Any
 
@@ -146,12 +147,15 @@ def build_argv_muscle(
     input_native: str,
     output_native: str,
     threads: int,
+    mode: str = "align",
 ) -> list[str]:
     inp = rt.prepare_path(resolution, input_native)
     outp = rt.prepare_path(resolution, output_native)
     ver = _detect_muscle_version(resolution.executable or "muscle")
     if ver == 3:
         cmd_parts = ["-in", inp, "-out", outp, "-maxiters", "2", "-diags"]
+    elif mode == "super5":
+        cmd_parts = ["-super5", inp, "-output", outp, "-threads", str(threads)]
     else:
         cmd_parts = ["-align", inp, "-output", outp, "-threads", str(threads)]
     return argv_for_resolution(resolution, cmd_parts)
@@ -191,19 +195,18 @@ def _materialize_twilight_safe_fasta(original_path: str) -> str:
             os.unlink(tree_path)
         except OSError:
             pass
-        out_recs: list[SeqRecord] = []
-        for i, rec in enumerate(SeqIO.parse(original_path, "fasta"), start=1):
-            nid = f"twilight_seq_{i:06d}"
-            out_recs.append(SeqRecord(rec.seq, id=nid, description=""))
         parent = os.path.dirname(os.path.abspath(safe_path))
         if parent:
             os.makedirs(parent, exist_ok=True)
-        SeqIO.write(out_recs, safe_path, "fasta")
+        with open(safe_path, "w", encoding="utf-8") as out:
+            for i, rec in enumerate(SeqIO.parse(original_path, "fasta"), start=1):
+                nid = f"twilight_seq_{i:06d}"
+                SeqIO.write(SeqRecord(rec.seq, id=nid, description=""), out, "fasta")
     return safe_path
 
 
 def _guide_tree_subprocess_timeout(seq_count: int) -> float:
-    """Seconds for ``famsa -gt_export`` (NJ). Large *N* can exceed many hours."""
+    """Seconds for ``famsa -gt_export``. Large *N* can exceed many hours."""
     if seq_count <= 5_000:
         return 14_400.0  # 4 h floor for noisy hosts
     if seq_count <= 100_000:
@@ -211,19 +214,24 @@ def _guide_tree_subprocess_timeout(seq_count: int) -> float:
     return 691_200.0  # 192 h hero tier
 
 
-def _ensure_guide_tree(input_fasta: str, threads: int, seq_count: int) -> tuple[str | None, str]:
-    """Build FAMSA NJ guide tree for TWILIGHT. Returns ``(path, \"\")`` or ``(None, error)``.
+def _ensure_guide_tree(
+    input_fasta: str,
+    threads: int,
+    seq_count: int,
+    method: str,
+) -> tuple[str | None, str, float | None]:
+    """Build FAMSA guide tree for TWILIGHT. Returns ``(path, \"\", seconds)`` or failure.
 
     Drops cached ``*.twilight_guide.nwk`` if older than *input_fasta* so labels stay in sync.
     """
-    tree_path = input_fasta + ".twilight_guide.nwk"
+    tree_path = input_fasta + f".twilight_guide_{method}.nwk"
     if (
         os.path.isfile(tree_path)
         and os.path.getsize(tree_path) > 0
         and os.path.isfile(input_fasta)
         and os.path.getmtime(tree_path) >= os.path.getmtime(input_fasta)
     ):
-        return tree_path, ""
+        return tree_path, "", 0.0
 
     try:
         os.unlink(tree_path)
@@ -232,9 +240,10 @@ def _ensure_guide_tree(input_fasta: str, threads: int, seq_count: int) -> tuple[
 
     _res, famsa_exe = try_resolve_executable("famsa")
     if not famsa_exe:
-        return None, "famsa not resolved (needed for TWILIGHT guide tree)"
+        return None, "famsa not resolved (needed for TWILIGHT guide tree)", None
 
     budget = _guide_tree_subprocess_timeout(seq_count)
+    t0 = time.monotonic()
     try:
         proc = subprocess.run(
             [
@@ -242,7 +251,7 @@ def _ensure_guide_tree(input_fasta: str, threads: int, seq_count: int) -> tuple[
                 "-t",
                 str(threads),
                 "-gt",
-                "nj",
+                method,
                 "-gt_export",
                 input_fasta,
                 tree_path,
@@ -254,17 +263,19 @@ def _ensure_guide_tree(input_fasta: str, threads: int, seq_count: int) -> tuple[
     except subprocess.TimeoutExpired:
         return (
             None,
-            f"famsa -gt_export timed out ({budget:.0f}s) building guide tree (try smaller tier or fewer threads)",
+            f"famsa -gt {method} -gt_export timed out ({budget:.0f}s) building guide tree (try smaller tier or fewer threads)",
+            None,
         )
     except Exception as exc:
-        return None, f"famsa -gt_export error: {exc}"
+        return None, f"famsa -gt {method} -gt_export error: {exc}", None
+    wall = time.monotonic() - t0
 
     if proc.returncode != 0 or not (os.path.isfile(tree_path) and os.path.getsize(tree_path) > 0):
         err = (proc.stderr or proc.stdout or b"").decode("utf-8", errors="replace").strip()
         hint = err[:800] if err else "(no stderr)"
-        return None, f"famsa -gt_export failed (exit {proc.returncode}): {hint}"
+        return None, f"famsa -gt {method} -gt_export failed (exit {proc.returncode}): {hint}", wall
 
-    return tree_path, ""
+    return tree_path, "", wall
 
 
 def build_argv_twilight(
@@ -314,10 +325,15 @@ def run_one_alignment(
     resolution,
     rt,
     tier: str = "custom",
+    muscle_mode: str = "align",
+    twilight_guide_tree: str = "nj",
+    keep_alignment_dir: str | None = None,
 ) -> dict[str, Any]:
     uid = uuid.uuid4().hex[:10]
-    tmp_dir = tempfile.gettempdir()
-    out_native = os.path.join(tmp_dir, f"bench_aln_{tool_id}_{uid}.fasta")
+    keep_outputs = keep_alignment_dir is not None and repeat_idx >= 0
+    output_dir = os.path.abspath(keep_alignment_dir) if keep_outputs else tempfile.gettempdir()
+    os.makedirs(output_dir, exist_ok=True)
+    out_native = os.path.join(output_dir, f"bench_aln_{tool_id}_{uid}.fasta")
 
     argv: list[str]
     stdout_capture: str | None = None
@@ -327,14 +343,19 @@ def run_one_alignment(
         argv = build_argv_clustalo(rt, resolution, input_path, out_native, threads)
     elif tool_id == "mafft":
         argv = build_argv_mafft(rt, resolution, input_path, threads)
-        stdout_capture = os.path.join(tmp_dir, f"bench_mafft_{uid}.stdout.fasta")
+        stdout_capture = os.path.join(output_dir, f"bench_mafft_{uid}.stdout.fasta")
     elif tool_id == "muscle":
-        argv = build_argv_muscle(rt, resolution, input_path, out_native, threads)
+        argv = build_argv_muscle(rt, resolution, input_path, out_native, threads, muscle_mode)
     elif tool_id in ("famsa", "famsa_gpu"):
         argv = build_argv_famsa(rt, resolution, input_path, out_native, threads)
     elif tool_id == "twilight":
         safe_in = _materialize_twilight_safe_fasta(input_path)
-        tree_path, tree_err = _ensure_guide_tree(safe_in, threads, seq_count)
+        tree_path, tree_err, tree_wall = _ensure_guide_tree(
+            safe_in,
+            threads,
+            seq_count,
+            twilight_guide_tree,
+        )
         argv = (
             build_argv_twilight(rt, resolution, safe_in, out_native, threads, tree_path)
             if tree_path
@@ -383,6 +404,12 @@ def run_one_alignment(
     }
     if tool_id == "twilight":
         row["twilight_c_threads"] = max(1, min(int(threads), TWILIGHT_MAX_CPU_CORES))
+        row["twilight_guide_tree"] = twilight_guide_tree
+        row["twilight_guide_tree_seconds"] = tree_wall
+    if tool_id == "muscle":
+        row["muscle_mode"] = muscle_mode
+    if keep_outputs and aligned_path and os.path.isfile(aligned_path):
+        row["alignment_path"] = os.path.abspath(aligned_path)
 
     qual: dict[str, Any] = {}
     if (
@@ -410,8 +437,9 @@ def run_one_alignment(
 
     row.update(qual)
 
+    kept_paths = {os.path.abspath(aligned_path)} if keep_outputs and aligned_path else set()
     for p in (out_native, stdout_capture):
-        if p and os.path.isfile(p):
+        if p and os.path.isfile(p) and os.path.abspath(p) not in kept_paths:
             try:
                 os.unlink(p)
             except OSError:
@@ -437,12 +465,29 @@ def main() -> None:
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--warmup", type=int, default=1)
     ap.add_argument(
+        "--muscle-mode",
+        choices=("align", "super5"),
+        default="align",
+        help="MUSCLE v5 mode. 'align' is the v5 PPP path; 'super5' is faster for large inputs.",
+    )
+    ap.add_argument(
+        "--twilight-guide-tree",
+        choices=("nj", "sl", "upgma"),
+        default="nj",
+        help="FAMSA guide-tree method used before TWILIGHT.",
+    )
+    ap.add_argument(
         "--tier",
         default="custom",
         help='JSONL "tier" field for this run (default custom; use tiered harness for 1–4)',
     )
     ap.add_argument("--work-dir", default=os.path.join("benchmark_runs", "data"))
     ap.add_argument("--out", default=os.path.join("benchmark_runs", "alignment.jsonl"))
+    ap.add_argument(
+        "--keep-alignments",
+        default=None,
+        help="Optional directory for retaining measured alignment FASTA outputs.",
+    )
     args = ap.parse_args()
 
     sizes = parse_sizes(args.sizes)
@@ -458,6 +503,10 @@ def main() -> None:
     rt = get_tool_runtime()
     versions = collect_alignment_tool_versions(list(ALIGNMENT_TOOL_IDS))
     meta = collect_system_metadata(versions)
+    meta["alignment_options"] = {
+        "muscle_mode": args.muscle_mode,
+        "twilight_guide_tree": args.twilight_guide_tree,
+    }
     meta_path = os.path.join(
         os.path.dirname(os.path.abspath(args.out)) or ".",
         "alignment_session_meta.json",
@@ -495,6 +544,9 @@ def main() -> None:
                             resolution=resolution,
                             rt=rt,
                             tier=str(args.tier),
+                            muscle_mode=args.muscle_mode,
+                            twilight_guide_tree=args.twilight_guide_tree,
+                            keep_alignment_dir=args.keep_alignments,
                         )
                         continue
                     row = run_one_alignment(
@@ -507,6 +559,9 @@ def main() -> None:
                         resolution=resolution,
                         rt=rt,
                         tier=str(args.tier),
+                        muscle_mode=args.muscle_mode,
+                        twilight_guide_tree=args.twilight_guide_tree,
+                        keep_alignment_dir=args.keep_alignments,
                     )
                     rep_record += 1
                     append_jsonl(out_abs, row)
