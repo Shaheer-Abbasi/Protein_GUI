@@ -99,3 +99,7 @@ E:\Projects\Protein-GUI\CONFIGURATION_GUIDE.md
 
 # AI context snapshot (not for version control)
 CODEBASE_REFERENCE.md
+
+# Local benchmark/build outputs
+benchmark_runs/
+external/
